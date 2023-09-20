@@ -38,6 +38,9 @@ impl Segments {
     pub fn right(&self, i: usize) -> usize {
         (self._bit >> i).trailing_ones() as usize + i
     }
+    pub fn left_right(&self, i: usize) -> (usize, usize) {
+        (self.left(i), self.right(i))
+    }
     pub fn size(&self, i: usize) -> usize {
         self.right(i) - self.left(i)
     }

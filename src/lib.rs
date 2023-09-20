@@ -19,21 +19,61 @@ pub type Hints = [Vec<Vec<usize>>; 2];
 pub enum State {
     Unconfirmed,
     White,
-    Black(Option<usize>),
+    Black,
 }
 
+#[derive(Clone, Debug)]
 enum Operation {
-    CheckLeftmostAndRightmost,
-    SetWhiteIfNoCandidates,
+    CheckLeftmostAndRightmost(usize, (usize, usize), (usize, usize)),
+    SetWhiteIfNoCandidates(usize),
     SetBlackIfLeftEndIsConfirmed,
     SetBlackIfRightEndIsConfirmed,
     SetBlackIfBothEndIsConfirmed,
-    SetWhiteIfTheLengthIsConfirmed,
+    SetWhiteIfTheLengthIsConfirmed((usize, usize)),
     SetWhiteIfTooLong,
     SetWhiteIfTooShort,
-    SetIdIfTheLengthIsConfirmed,
+    SetIdIfTheLengthIsConfirmed(usize, (usize, usize)),
     SetIdIfEnoughLong,
     SetSameStateAsOrthogonal,
+}
+impl Display for Operation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Operation::CheckLeftmostAndRightmost(id, (l1, r1), (l2, r2)) => {
+                let l = l1.max(l2);
+                let r = r1.min(r2);
+                write!(
+                    f,
+                    "[{}, {r}] ([{}, {r1}] ∩ [{}, {r2}]) must be Black({id})",
+                    l + 1,
+                    l1 + 1,
+                    l2 + 1
+                )?;
+            }
+            Operation::SetWhiteIfNoCandidates(id) => {
+                write!(f, "[todo] must be White")?;
+            }
+            Operation::SetBlackIfLeftEndIsConfirmed => todo!(),
+            Operation::SetBlackIfRightEndIsConfirmed => todo!(),
+            Operation::SetBlackIfBothEndIsConfirmed => todo!(),
+            Operation::SetWhiteIfTheLengthIsConfirmed((l, r)) => {
+                write!(f, "the length of [{}, {r}] must be {}", l + 1, r - l)?;
+            }
+            Operation::SetWhiteIfTooLong => todo!(),
+            Operation::SetWhiteIfTooShort => todo!(),
+            Operation::SetIdIfTheLengthIsConfirmed(id, (l, r)) => {
+                write!(
+                    f,
+                    "must be Black({id}) because the length of [{}, {r}] is {}",
+                    l + 1,
+                    r - l
+                )?;
+            }
+            Operation::SetIdIfEnoughLong => todo!(),
+            Operation::SetSameStateAsOrthogonal => todo!(),
+        };
+        Ok(())
+    }
 }
 struct Line {
     n: usize,
@@ -44,7 +84,7 @@ struct Line {
     segments_unconfirmed: Segments,
     _id_ranges: Vec<(usize, usize)>,
     size_candidates: Vec<BitSet>,
-    updates: VecDeque<(usize, State, Operation)>,
+    updates: VecDeque<(Range<usize>, State, Operation)>,
 }
 impl Line {
     fn new(n: usize, hint: Vec<usize>) -> Self {
@@ -66,62 +106,87 @@ impl Line {
     fn id_range(&self, j: usize) -> Range<usize> {
         self._id_ranges[j].0..self._id_ranges[j].1
     }
-    fn get_update(&mut self) -> Option<(usize, State, Operation)> {
+    fn get_update(&mut self) -> Option<(Range<usize>, State, Operation)> {
         self.updates.pop_front()
     }
-    fn set(&mut self, j: usize, state: State, by: Operation) -> Result<(), SolverError> {
-        match (self.states[j], state) {
-            (State::Unconfirmed, State::Unconfirmed) => return Ok(()),
-            (State::Unconfirmed, State::White) => {}
-            (State::Unconfirmed, State::Black(_)) => {}
+    fn has_update(&self) -> bool {
+        !self.updates.is_empty()
+    }
+    fn description(&self, j: usize, by: Operation) {}
+    fn set_range(
+        &mut self,
+        range: Range<usize>,
+        state: State,
+        by: Operation,
+    ) -> Result<(), SolverError> {
+        if range.is_empty() {
+            return Ok(());
+        }
+        let mut updated_segment = Segments::new();
+        for j in range.clone() {
+            match (self.states[j], state) {
+                (State::Unconfirmed, State::Unconfirmed) => continue,
+                (State::Unconfirmed, State::White) => {}
+                (State::Unconfirmed, State::Black) => {}
 
-            (State::White, State::Unconfirmed | State::Black(_)) => {
-                return Err(SolverError::InternalError)
-            }
-            (State::White, State::White) => return Ok(()),
+                (State::White, State::Unconfirmed | State::Black) => {
+                    return Err(SolverError::InternalError)
+                }
+                (State::White, State::White) => continue,
 
-            (State::Black(_), State::Unconfirmed | State::White) => {
-                return Err(SolverError::InternalError)
-            }
-            (State::Black(_), State::Black(None)) => return Ok(()),
-            (State::Black(None), State::Black(Some(_))) => {}
-            (State::Black(Some(x)), State::Black(Some(y))) => {
-                if x != y {
-                    return Err(SolverError::InternalError);
+                (State::Black, State::Unconfirmed | State::White) => {
+                    return Err(SolverError::InternalError)
                 }
-                return Ok(());
+                (State::Black, State::Black) => continue,
+            };
+            self.states[j] = state;
+            updated_segment.insert(j);
+            match state {
+                State::Unconfirmed => {}
+                State::White => {
+                    self.segments_non_white.erase(j);
+                    self.segments_unconfirmed.erase(j);
+                }
+                State::Black => {
+                    self.segments_black.insert(j);
+                    self.segments_unconfirmed.erase(j);
+                }
+            };
+        }
+        if state == State::Black {
+            let mut id_range = (0, self.hint.len());
+            let (l, r) = self.segments_black.left_right(range.start);
+            for j in l..r {
+                id_range.0.setmax(self.id_range(j).start);
+                id_range.1.setmin(self.id_range(j).end);
             }
-        };
-        self.states[j] = state;
-        match state {
-            State::Unconfirmed => {}
-            State::White => {
-                self.segments_non_white.erase(j);
-                self.segments_unconfirmed.erase(j);
-            }
-            State::Black(Some(id)) => {
-                self.segments_black.insert(j);
-                self.segments_unconfirmed.erase(j);
-                let (l, r) = (self.segments_black.left(j), self.segments_black.right(j));
-                for j in l..r {
-                    self.states[j] = State::Black(Some(id));
-                    self._id_ranges[j] = (id, id + 1);
+            for j in l..r {
+                if self._id_ranges[j] != id_range {
+                    self._id_ranges[j] = id_range;
+                    updated_segment.insert(j);
                 }
             }
-            State::Black(None) => {
-                self.segments_black.insert(j);
-                self.segments_unconfirmed.erase(j);
-            }
-        };
+        }
         if !matches!(by, Operation::SetSameStateAsOrthogonal) {
-            self.updates.push_back((j, self.states[j], by));
+            for (l, r) in updated_segment.segments() {
+                self.updates.push_back((l..r, state, by.clone()));
+            }
         }
         Ok(())
     }
-
+    fn set(&mut self, j: usize, state: State, by: Operation) -> Result<(), SolverError> {
+        self.set_range(j..j + 1, state, by)
+    }
+    fn confirmed_id(&self, j: usize) -> Option<usize> {
+        if self.id_range(j).len() == 1 {
+            Some(self.id_range(j).start)
+        } else {
+            None
+        }
+    }
     fn solve(&mut self) -> Result<(), SolverError> {
         loop {
-            let prev = self.states.clone();
+            let (prev_states, prev_id_ranges) = (self.states.clone(), self._id_ranges.clone());
             self.check_leftmost_and_rightmost()?;
             self.set_white_if_no_candidates()?;
             self.set_black_if_left_end_is_confirmed()?;
@@ -130,9 +195,7 @@ impl Line {
             self.set_white_if_the_length_is_confirmed()?;
             self.set_white_if_too_long()?;
             self.set_white_if_too_short()?;
-            self.set_id_if_the_length_is_confirmed()?;
-            self.set_id_if_enough_long()?;
-            if self.states == prev {
+            if prev_states == self.states && prev_id_ranges == self._id_ranges {
                 break;
             }
         }
@@ -148,8 +211,7 @@ impl Line {
         for id in (0..m).rev() {
             j = (1..=j)
                 .rfind(|&j| {
-                    matches!(self.states[j - 1], State::Black(_))
-                        && self._id_ranges[j - 1].1 <= id + 1
+                    matches!(self.states[j - 1], State::Black) && self._id_ranges[j - 1].1 <= id + 1
                 })
                 .unwrap_or(0);
             if j > self.hint[id] {
@@ -181,7 +243,7 @@ impl Line {
         let mut j = 0;
         for id in 0..m {
             j = (j..self.n)
-                .find(|&j| matches!(self.states[j], State::Black(_)) && self._id_ranges[j].0 >= id)
+                .find(|&j| matches!(self.states[j], State::Black) && self._id_ranges[j].0 >= id)
                 .unwrap_or(self.n);
             if j + self.hint[id] <= self.n {
                 rs[id].setmin(j + self.hint[id]);
@@ -210,13 +272,11 @@ impl Line {
             let (l1, r1) = segments_left[id];
             let (l2, r2) = segments_right[id];
             let (l, r) = (l1.max(l2), r1.min(r2));
-            for j in l..r {
-                self.set(
-                    j,
-                    State::Black(Some(id)),
-                    Operation::CheckLeftmostAndRightmost,
-                )?;
-            }
+            self.set_range(
+                l..r,
+                State::Black,
+                Operation::CheckLeftmostAndRightmost(id, (l1, r1), (l2, r2)),
+            )?;
         }
         for id in 0..m {
             let (l, r) = (segments_left[id].0, segments_right[id].1);
@@ -235,19 +295,6 @@ impl Line {
 
         Ok(())
     }
-    fn set_id_if_enough_long(&mut self) -> Result<(), SolverError> {
-        for j in 0..self.n {
-            if self.states[j] != State::Black(None) {
-                continue;
-            }
-            let size = self.segments_black.size(j);
-            if self.id_range(j).filter(|&id| size <= self.hint[id]).count() == 1 {
-                let id = self.id_range(j).find(|&id| size <= self.hint[id]).unwrap();
-                self.set(j, State::Black(Some(id)), Operation::SetIdIfEnoughLong)?;
-            }
-        }
-        Ok(())
-    }
     fn set_white_if_the_length_is_confirmed(&mut self) -> Result<(), SolverError> {
         for (l, r) in self.segments_black.segments() {
             if (l == 0 || self.states[l] == State::White)
@@ -264,36 +311,16 @@ impl Line {
                         self.set(
                             l - 1,
                             State::White,
-                            Operation::SetWhiteIfTheLengthIsConfirmed,
+                            Operation::SetWhiteIfTheLengthIsConfirmed((l, r)),
                         )?;
                     }
                     if r < self.n {
-                        self.set(r, State::White, Operation::SetWhiteIfTheLengthIsConfirmed)?;
+                        self.set(
+                            r,
+                            State::White,
+                            Operation::SetWhiteIfTheLengthIsConfirmed((l, r)),
+                        )?;
                     }
-                    break;
-                }
-            }
-        }
-        Ok(())
-    }
-    fn set_id_if_the_length_is_confirmed(&mut self) -> Result<(), SolverError> {
-        for (l, r) in self.segments_black.segments() {
-            if !((l == 0 || self.states[l - 1] == State::White)
-                && (r == self.n || self.states[r] == State::White))
-            {
-                continue;
-            }
-            for j in l..r {
-                let mut cand = self.id_range(j).filter(|&id| self.hint[id] == r - l);
-                if let Some(id) = cand.next() {
-                    if cand.next().is_some() {
-                        continue;
-                    }
-                    self.set(
-                        j,
-                        State::Black(Some(id)),
-                        Operation::SetIdIfTheLengthIsConfirmed,
-                    )?;
                     break;
                 }
             }
@@ -303,7 +330,11 @@ impl Line {
     fn set_white_if_no_candidates(&mut self) -> Result<(), SolverError> {
         for j in 0..self.n {
             if self.id_range(j).is_empty() {
-                self.set(j, State::White, Operation::SetWhiteIfNoCandidates)?;
+                self.set(
+                    j,
+                    State::White,
+                    Operation::SetWhiteIfNoCandidates(self.id_range(j).start),
+                )?;
             }
         }
         Ok(())
@@ -325,13 +356,7 @@ impl Line {
             {
                 r += 1;
             }
-            for k in j..r {
-                self.set(
-                    k,
-                    State::Black(None),
-                    Operation::SetBlackIfLeftEndIsConfirmed,
-                )?;
-            }
+            self.set_range(j..r, State::Black, Operation::SetBlackIfLeftEndIsConfirmed)?;
         }
         Ok(())
     }
@@ -353,13 +378,7 @@ impl Line {
             {
                 l -= 1;
             }
-            for k in l..j {
-                self.set(
-                    k,
-                    State::Black(None),
-                    Operation::SetBlackIfRightEndIsConfirmed,
-                )?;
-            }
+            self.set_range(l..j, State::Black, Operation::SetBlackIfRightEndIsConfirmed)?;
         }
         Ok(())
     }
@@ -373,13 +392,7 @@ impl Line {
                 .iter()
                 .all(|size_candidate| size_candidate.count_lt(&size) == 0)
             {
-                for j in l..r {
-                    self.set(
-                        j,
-                        State::Black(None),
-                        Operation::SetBlackIfBothEndIsConfirmed,
-                    )?;
-                }
+                self.set_range(l..r, State::Black, Operation::SetBlackIfBothEndIsConfirmed)?;
             }
         }
         Ok(())
@@ -391,10 +404,10 @@ impl Line {
             }
             let id = self.id_range(j).start;
             let mut size = 1;
-            if j > 0 && matches!(self.states[j - 1], State::Black(_)) {
+            if j > 0 && matches!(self.states[j - 1], State::Black) {
                 size += self.segments_black.size(j - 1);
             }
-            if j + 1 < self.n && matches!(self.states[j + 1], State::Black(_)) {
+            if j + 1 < self.n && matches!(self.states[j + 1], State::Black) {
                 size += self.segments_black.size(j + 1);
             }
             if size > self.hint[id] {
@@ -411,13 +424,8 @@ impl Line {
             if r < self.n && self.states[r] != State::White {
                 continue;
             }
-            for j in l..r {
-                if self.id_range(j).all(|id| self.hint[id] > r - l) {
-                    for j in l..r {
-                        self.set(j, State::White, Operation::SetWhiteIfTooShort)?;
-                    }
-                    break;
-                }
+            if (l..r).any(|j| self.size_candidates[j].min().unwrap_or(0) > r - l) {
+                self.set_range(l..r, State::White, Operation::SetWhiteIfTooShort)?;
             }
         }
         Ok(())
@@ -432,7 +440,7 @@ impl Display for Line {
             match self.states[j] {
                 State::Unconfirmed => write!(f, "?")?,
                 State::White => write!(f, "x")?,
-                State::Black(_) => write!(f, "o")?,
+                State::Black => write!(f, "o")?,
             }
         }
         Ok(())
@@ -443,7 +451,7 @@ pub struct Solver {
     n: usize,
     lines: [Vec<Line>; 2],
     queue: VecDeque<(usize, usize)>,
-    history: VecDeque<((usize, usize, usize), Operation)>,
+    history: VecDeque<((usize, usize, Range<usize>), Operation)>,
 }
 impl Solver {
     pub fn new(hints: [Vec<Vec<usize>>; 2]) -> Self {
@@ -469,7 +477,7 @@ impl Solver {
                 .map(|hint| Line::new(n, hint.clone()))
                 .collect(),
         ];
-        let queue = (0..n).flat_map(|i| [(0, i), (1, i)]).collect();
+        let queue = VecDeque::new();
         let history = VecDeque::new();
         Self {
             n,
@@ -480,16 +488,17 @@ impl Solver {
     }
 
     pub fn solve(&mut self) -> Result<(), SolverError> {
+        self.queue = (0..2)
+            .flat_map(|axis| (0..self.n).map(move |i| (axis, i)))
+            .collect();
         while let Some((axis, i)) = self.queue.pop_front() {
             self.lines[axis][i].solve()?;
-            while let Some((j, state, by)) = self.lines[axis][i].get_update() {
-                self.history.push_back(((axis, i, j), by));
-                let state = match state {
-                    State::Black(Some(_)) => State::Black(None),
-                    _ => state,
-                };
-                self.lines[axis ^ 1][j].set(i, state, Operation::SetSameStateAsOrthogonal)?;
-                self.queue.push_back((axis ^ 1, j));
+            while let Some((range, state, by)) = self.lines[axis][i].get_update() {
+                self.history.push_back(((axis, i, range.clone()), by));
+                for j in range {
+                    self.lines[axis ^ 1][j].set(i, state, Operation::SetSameStateAsOrthogonal)?;
+                    self.queue.push_back((axis ^ 1, j));
+                }
             }
         }
         if self.lines[0]
@@ -505,6 +514,15 @@ impl Solver {
     // 一度 solve() を呼んでから使う。
     // solve() はコンストラクタで呼ぶべきか
     pub fn advance() {}
+
+    fn description(&self, axis: usize, i: usize, j: usize, by: Operation) {
+        match by {
+            Operation::SetSameStateAsOrthogonal => {
+                todo!();
+            }
+            _ => self.lines[axis][i].description(j, by),
+        };
+    }
 
     pub fn judge(&self) -> bool {
         for i in 0..self.n {
@@ -580,10 +598,11 @@ impl std::fmt::Display for Solver {
                     match self.lines[0][y].states[x] {
                         State::Unconfirmed => ".".to_string(),
                         State::White => "x".to_string(),
-                        State::Black(k) => {
-                            match k {
-                                Some(k) => format!("{k}"),
-                                None => "o".to_string(),
+                        State::Black => {
+                            if let Some(id) = self.lines[0][y].confirmed_id(x) {
+                                format!("{id}")
+                            } else {
+                                "o".to_string()
                             }
                         }
                     }
@@ -600,10 +619,11 @@ impl std::fmt::Display for Solver {
                     match self.lines[1][x].states[y] {
                         State::Unconfirmed => ".".to_string(),
                         State::White => "x".to_string(),
-                        State::Black(k) => {
-                            match k {
-                                Some(k) => format!("{k}"),
-                                None => "o".to_string(),
+                        State::Black => {
+                            if let Some(id) = self.lines[1][x].confirmed_id(y) {
+                                format!("{id}")
+                            } else {
+                                "o".to_string()
                             }
                         }
                     }
@@ -620,7 +640,7 @@ impl std::fmt::Display for Solver {
                     match self.lines[0][y].states[x] {
                         State::Unconfirmed => "?".to_string(),
                         State::White => ".".to_string(),
-                        State::Black(_) => "o".to_string(),
+                        State::Black => "o".to_string(),
                     }
                 )?
             }
@@ -643,12 +663,15 @@ mod tests {
             line.states,
             vec![
                 State::Unconfirmed,
-                State::Black(Some(0)),
-                State::Black(Some(0)),
-                State::Black(Some(0)),
+                State::Black,
+                State::Black,
+                State::Black,
                 State::Unconfirmed,
             ]
         );
+        assert_eq!(line.confirmed_id(1), Some(0));
+        assert_eq!(line.confirmed_id(2), Some(0));
+        assert_eq!(line.confirmed_id(3), Some(0));
 
         // .....
         let mut line = Line::new(5, vec![3, 1]);
@@ -656,19 +679,23 @@ mod tests {
         assert_eq!(
             line.states,
             vec![
-                State::Black(Some(0)),
-                State::Black(Some(0)),
-                State::Black(Some(0)),
+                State::Black,
+                State::Black,
+                State::Black,
                 State::Unconfirmed,
-                State::Black(Some(1)),
+                State::Black,
             ]
         );
+        assert_eq!(line.confirmed_id(0), Some(0));
+        assert_eq!(line.confirmed_id(1), Some(0));
+        assert_eq!(line.confirmed_id(2), Some(0));
+        assert_eq!(line.confirmed_id(4), Some(1));
 
         // .xoo.
         let mut line = Line::new(5, vec![1, 2]);
         line.set(1, State::White, Operation::SetSameStateAsOrthogonal);
-        line.set(2, State::Black(None), Operation::SetSameStateAsOrthogonal);
-        line.set(3, State::Black(None), Operation::SetSameStateAsOrthogonal);
+        line.set(2, State::Black, Operation::SetSameStateAsOrthogonal);
+        line.set(3, State::Black, Operation::SetSameStateAsOrthogonal);
         line.check_leftmost_and_rightmost();
 
         // ..........
@@ -678,143 +705,107 @@ mod tests {
             line.states,
             vec![
                 State::Unconfirmed,
-                State::Black(Some(0)),
-                State::Black(Some(0)),
+                State::Black,
+                State::Black,
                 State::Unconfirmed,
                 State::Unconfirmed,
-                State::Black(Some(1)),
+                State::Black,
                 State::Unconfirmed,
                 State::Unconfirmed,
-                State::Black(Some(2)),
+                State::Black,
                 State::Unconfirmed,
             ]
         );
+        assert_eq!(line.confirmed_id(1), Some(0));
+        assert_eq!(line.confirmed_id(2), Some(0));
+        assert_eq!(line.confirmed_id(5), Some(1));
+        assert_eq!(line.confirmed_id(8), Some(2));
 
         // ....xoo.oo....x..x..
         let mut line = Line::new(20, vec![1, 2, 5, 1, 1]);
         line.set(4, State::White, Operation::SetSameStateAsOrthogonal);
-        line.set(5, State::Black(None), Operation::SetSameStateAsOrthogonal);
-        line.set(6, State::Black(None), Operation::SetSameStateAsOrthogonal);
-        line.set(8, State::Black(None), Operation::SetSameStateAsOrthogonal);
-        line.set(9, State::Black(None), Operation::SetSameStateAsOrthogonal);
+        line.set(5, State::Black, Operation::SetSameStateAsOrthogonal);
+        line.set(6, State::Black, Operation::SetSameStateAsOrthogonal);
+        line.set(8, State::Black, Operation::SetSameStateAsOrthogonal);
+        line.set(9, State::Black, Operation::SetSameStateAsOrthogonal);
         line.set(14, State::White, Operation::SetSameStateAsOrthogonal);
         line.set(17, State::White, Operation::SetSameStateAsOrthogonal);
-        line.check_leftmost_and_rightmost();
-        assert_eq!(
-            line.states,
-            vec![
-                State::Unconfirmed,
-                State::Unconfirmed,
-                State::Unconfirmed,
-                State::Unconfirmed,
-                State::White,
-                State::Black(None),
-                State::Black(None),
-                State::Unconfirmed,
-                State::Black(Some(2)),
-                State::Black(Some(2)),
-                State::Unconfirmed,
-                State::Unconfirmed,
-                State::Unconfirmed,
-                State::Unconfirmed,
-                State::White,
-                State::Unconfirmed,
-                State::Unconfirmed,
-                State::White,
-                State::Unconfirmed,
-                State::Unconfirmed,
-            ]
-        );
-        line.check_leftmost_and_rightmost();
-        assert_eq!(
-            line.states,
-            vec![
-                State::Unconfirmed,
-                State::Unconfirmed,
-                State::Unconfirmed,
-                State::Unconfirmed,
-                State::White,
-                State::Black(None),
-                State::Black(None),
-                State::Unconfirmed,
-                State::Black(Some(2)),
-                State::Black(Some(2)),
-                State::Unconfirmed,
-                State::Unconfirmed,
-                State::Unconfirmed,
-                State::Unconfirmed,
-                State::White,
-                State::Unconfirmed,
-                State::Unconfirmed,
-                State::White,
-                State::Unconfirmed,
-                State::Unconfirmed,
-            ]
-        );
-    }
-
-    #[test]
-    fn test_set_id_if_enough_long() {
-        // ....oo....
-        let mut line = Line::new(10, vec![1, 3]);
-        line.set(4, State::Black(None), Operation::SetSameStateAsOrthogonal);
-        line.set(5, State::Black(None), Operation::SetSameStateAsOrthogonal);
-        line.check_leftmost_and_rightmost();
-        line.set_id_if_enough_long();
-        assert_eq!(line.states[4], State::Black(Some(1)));
-        assert_eq!(line.states[5], State::Black(Some(1)));
+        for _ in 0..2 {
+            line.check_leftmost_and_rightmost();
+            assert_eq!(
+                line.states,
+                vec![
+                    State::Unconfirmed,
+                    State::Unconfirmed,
+                    State::Unconfirmed,
+                    State::Unconfirmed,
+                    State::White,
+                    State::Black,
+                    State::Black,
+                    State::Unconfirmed,
+                    State::Black,
+                    State::Black,
+                    State::Unconfirmed,
+                    State::Unconfirmed,
+                    State::Unconfirmed,
+                    State::Unconfirmed,
+                    State::White,
+                    State::Unconfirmed,
+                    State::Unconfirmed,
+                    State::White,
+                    State::Unconfirmed,
+                    State::Unconfirmed,
+                ]
+            );
+            assert_eq!(line.confirmed_id(5), None);
+            assert_eq!(line.confirmed_id(6), None);
+            assert_eq!(line.confirmed_id(8), Some(2));
+            assert_eq!(line.confirmed_id(9), Some(2));
+        }
     }
     #[test]
     fn test_set_white_if_the_length_is_confirmed() {
         // ....oo....
         let mut line = Line::new(10, vec![2, 2]);
-        line.set(4, State::Black(None), Operation::SetSameStateAsOrthogonal);
-        line.set(5, State::Black(None), Operation::SetSameStateAsOrthogonal);
+        line.set(4, State::Black, Operation::SetSameStateAsOrthogonal);
+        line.set(5, State::Black, Operation::SetSameStateAsOrthogonal);
         line.set_white_if_the_length_is_confirmed();
         assert_eq!(line.states[3], State::White);
         assert_eq!(line.states[6], State::White);
     }
-    #[test]
-    fn test_set_id_if_the_length_is_confirmed() {
-        let mut line = Line::new(10, vec![2, 3]);
-        line.set(3, State::White, Operation::SetSameStateAsOrthogonal);
-        line.set(4, State::Black(None), Operation::SetSameStateAsOrthogonal);
-        line.set(5, State::Black(None), Operation::SetSameStateAsOrthogonal);
-        line.set(6, State::White, Operation::SetSameStateAsOrthogonal);
-        line.set_id_if_the_length_is_confirmed();
-        assert_eq!(line.states[4], State::Black(Some(0)));
-        assert_eq!(line.states[5], State::Black(Some(0)));
-    }
+
     #[test]
     fn test_set_white_if_no_candidates() {
         // .o......o.
         let mut line = Line::new(10, vec![2, 2]);
-        line.set(1, State::Black(None), Operation::SetSameStateAsOrthogonal);
-        line.set(8, State::Black(None), Operation::SetSameStateAsOrthogonal);
+        line.set(1, State::Black, Operation::SetSameStateAsOrthogonal);
+        line.set(8, State::Black, Operation::SetSameStateAsOrthogonal);
         line.check_leftmost_and_rightmost();
         line.set_white_if_no_candidates();
         assert_eq!(
             line.states,
             vec![
                 State::Unconfirmed,
-                State::Black(Some(0)),
+                State::Black,
                 State::Unconfirmed,
                 State::White,
                 State::White,
                 State::White,
                 State::White,
                 State::Unconfirmed,
-                State::Black(Some(1)),
+                State::Black,
                 State::Unconfirmed,
             ]
         );
+        assert_eq!(line.confirmed_id(1), Some(0));
+        assert_eq!(line.confirmed_id(8), Some(1));
     }
     #[test]
     fn test_set_black_if_left_end_is_confirmed() {
         // ....xo....
         let mut line = Line::new(10, vec![2, 2]);
         line.set(4, State::White, Operation::SetSameStateAsOrthogonal);
-        line.set(5, State::Black(None), Operation::SetSameStateAsOrthogonal);
+        line.set(5, State::Black, Operation::SetSameStateAsOrthogonal);
         line.set_black_if_left_end_is_confirmed();
         assert_eq!(
             line.states,
@@ -824,27 +815,29 @@ mod tests {
                 State::Unconfirmed,
                 State::Unconfirmed,
                 State::White,
-                State::Black(None),
-                State::Black(None),
+                State::Black,
+                State::Black,
                 State::Unconfirmed,
                 State::Unconfirmed,
                 State::Unconfirmed,
             ]
         );
+        assert_eq!(line.confirmed_id(5), None);
+        assert_eq!(line.confirmed_id(6), None);
 
         let mut line = Line::new(30, vec![2, 6, 5, 2, 1]);
-        line.set(0, State::Black(None), Operation::SetSameStateAsOrthogonal);
-        line.set(1, State::Black(None), Operation::SetSameStateAsOrthogonal);
+        line.set(0, State::Black, Operation::SetSameStateAsOrthogonal);
+        line.set(1, State::Black, Operation::SetSameStateAsOrthogonal);
         line.set(2, State::White, Operation::SetSameStateAsOrthogonal);
         line.set(9, State::White, Operation::SetSameStateAsOrthogonal);
-        line.set(12, State::Black(None), Operation::SetSameStateAsOrthogonal);
+        line.set(12, State::Black, Operation::SetSameStateAsOrthogonal);
         line.check_leftmost_and_rightmost();
         line.set_black_if_left_end_is_confirmed();
         assert_eq!(
             line.states,
             vec![
-                State::Black(Some(0,),),
-                State::Black(Some(0,),),
+                State::Black,
+                State::Black,
                 State::White,
                 State::Unconfirmed,
                 State::Unconfirmed,
@@ -855,9 +848,9 @@ mod tests {
                 State::White,
                 State::Unconfirmed,
                 State::Unconfirmed,
-                State::Black(None,),
-                State::Black(None,),
-                State::Black(None,),
+                State::Black,
+                State::Black,
+                State::Black,
                 State::Unconfirmed,
                 State::Unconfirmed,
                 State::Unconfirmed,
@@ -875,14 +868,19 @@ mod tests {
                 State::Unconfirmed,
             ]
         );
+        assert_eq!(line.confirmed_id(0), Some(0));
+        assert_eq!(line.confirmed_id(1), Some(0));
+        assert_eq!(line.confirmed_id(12), None);
+        assert_eq!(line.confirmed_id(13), None);
+        assert_eq!(line.confirmed_id(14), None);
 
         // ....xoo.oo....x..x..
         let mut line = Line::new(20, vec![1, 2, 5, 1, 1]);
         line.set(4, State::White, Operation::SetSameStateAsOrthogonal);
-        line.set(5, State::Black(None), Operation::SetSameStateAsOrthogonal);
-        line.set(6, State::Black(None), Operation::SetSameStateAsOrthogonal);
-        line.set(8, State::Black(None), Operation::SetSameStateAsOrthogonal);
-        line.set(9, State::Black(None), Operation::SetSameStateAsOrthogonal);
+        line.set(5, State::Black, Operation::SetSameStateAsOrthogonal);
+        line.set(6, State::Black, Operation::SetSameStateAsOrthogonal);
+        line.set(8, State::Black, Operation::SetSameStateAsOrthogonal);
+        line.set(9, State::Black, Operation::SetSameStateAsOrthogonal);
         line.set(14, State::White, Operation::SetSameStateAsOrthogonal);
         line.set(17, State::White, Operation::SetSameStateAsOrthogonal);
         line.check_leftmost_and_rightmost();
@@ -896,11 +894,11 @@ mod tests {
                 State::Unconfirmed,
                 State::Unconfirmed,
                 State::White,
-                State::Black(None),
-                State::Black(None),
+                State::Black,
+                State::Black,
                 State::Unconfirmed,
-                State::Black(Some(2)),
-                State::Black(Some(2)),
+                State::Black,
+                State::Black,
                 State::Unconfirmed,
                 State::Unconfirmed,
                 State::Unconfirmed,
@@ -913,13 +911,17 @@ mod tests {
                 State::Unconfirmed,
             ]
         );
+        assert_eq!(line.confirmed_id(5), None);
+        assert_eq!(line.confirmed_id(6), None);
+        assert_eq!(line.confirmed_id(8), Some(2));
+        assert_eq!(line.confirmed_id(9), Some(2));
     }
 
     #[test]
     fn test_set_black_if_right_end_is_confirmed() {
         // ....ox....
         let mut line = Line::new(10, vec![2, 2]);
-        line.set(4, State::Black(None), Operation::SetSameStateAsOrthogonal);
+        line.set(4, State::Black, Operation::SetSameStateAsOrthogonal);
         line.set(5, State::White, Operation::SetSameStateAsOrthogonal);
         line.set_black_if_right_end_is_confirmed();
         assert_eq!(
@@ -928,8 +930,8 @@ mod tests {
                 State::Unconfirmed,
                 State::Unconfirmed,
                 State::Unconfirmed,
-                State::Black(None),
-                State::Black(None),
+                State::Black,
+                State::Black,
                 State::White,
                 State::Unconfirmed,
                 State::Unconfirmed,
@@ -937,17 +939,19 @@ mod tests {
                 State::Unconfirmed,
             ]
         );
+        assert_eq!(line.confirmed_id(3), None);
+        assert_eq!(line.confirmed_id(4), None);
 
         // .ox.......
         let mut line = Line::new(10, vec![2, 2]);
-        line.set(1, State::Black(None), Operation::SetSameStateAsOrthogonal);
+        line.set(1, State::Black, Operation::SetSameStateAsOrthogonal);
         line.set(2, State::White, Operation::SetSameStateAsOrthogonal);
         line.set_black_if_right_end_is_confirmed();
         assert_eq!(
             line.states,
             vec![
-                State::Black(None),
-                State::Black(None),
+                State::Black,
+                State::Black,
                 State::White,
                 State::Unconfirmed,
                 State::Unconfirmed,
@@ -958,6 +962,8 @@ mod tests {
                 State::Unconfirmed,
             ]
         );
+        assert_eq!(line.confirmed_id(0), None);
+        assert_eq!(line.confirmed_id(1), None);
     }
 
     #[test]
@@ -965,7 +971,7 @@ mod tests {
         // ...x.o.x...
         let mut line = Line::new(11, vec![3, 3]);
         line.set(3, State::White, Operation::SetSameStateAsOrthogonal);
-        line.set(5, State::Black(None), Operation::SetSameStateAsOrthogonal);
+        line.set(5, State::Black, Operation::SetSameStateAsOrthogonal);
         line.set(7, State::White, Operation::SetSameStateAsOrthogonal);
         line.set_black_if_both_end_is_confirmed();
         assert_eq!(
@@ -975,21 +981,24 @@ mod tests {
                 State::Unconfirmed,
                 State::Unconfirmed,
                 State::White,
-                State::Black(None),
-                State::Black(None),
-                State::Black(None),
+                State::Black,
+                State::Black,
+                State::Black,
                 State::White,
                 State::Unconfirmed,
                 State::Unconfirmed,
                 State::Unconfirmed,
             ]
         );
+        assert_eq!(line.confirmed_id(4), None);
+        assert_eq!(line.confirmed_id(5), None);
+        assert_eq!(line.confirmed_id(6), None);
     }
     #[test]
     fn test_set_white_if_too_long() {
         // ..o.......
         let mut line = Line::new(10, vec![1, 2]);
-        line.set(2, State::Black(None), Operation::SetSameStateAsOrthogonal);
+        line.set(2, State::Black, Operation::SetSameStateAsOrthogonal);
         line.check_leftmost_and_rightmost();
         line.set_white_if_too_long();
         assert_eq!(
@@ -997,7 +1006,7 @@ mod tests {
             vec![
                 State::Unconfirmed,
                 State::White,
-                State::Black(None),
+                State::Black,
                 State::Unconfirmed,
                 State::Unconfirmed,
                 State::Unconfirmed,
@@ -1007,12 +1016,13 @@ mod tests {
                 State::Unconfirmed,
             ]
         );
+        assert_eq!(line.confirmed_id(2), None);
     }
     #[test]
     fn test_set_white_if_too_short() {
         // .....ox.x......
         let mut line = Line::new(15, vec![1, 2, 2]);
-        line.set(5, State::Black(None), Operation::SetSameStateAsOrthogonal);
+        line.set(5, State::Black, Operation::SetSameStateAsOrthogonal);
         line.set(6, State::White, Operation::SetSameStateAsOrthogonal);
         line.set(8, State::White, Operation::SetSameStateAsOrthogonal);
         line.check_leftmost_and_rightmost();
@@ -1025,7 +1035,7 @@ mod tests {
                 State::Unconfirmed,
                 State::Unconfirmed,
                 State::Unconfirmed,
-                State::Black(None),
+                State::Black,
                 State::White,
                 State::White,
                 State::White,
@@ -1037,6 +1047,7 @@ mod tests {
                 State::Unconfirmed,
             ]
         );
+        assert_eq!(line.confirmed_id(5), None);
     }
     #[test]
     fn test_5x5() {
