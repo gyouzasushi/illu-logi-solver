@@ -2,16 +2,6 @@ mod util;
 use std::{collections::VecDeque, fmt::Display, ops::Range};
 
 use crate::util::{BitSet, Segments, SetMinMax};
-use thiserror::Error;
-
-#[derive(Error, Debug)]
-pub enum SolverError {
-    #[error("There is an issue with the solver.")]
-    InternalError,
-
-    #[error("The solver could not solve this problem.")]
-    Unsolvable,
-}
 
 pub type Hints = [Vec<Vec<usize>>; 2];
 
@@ -24,15 +14,15 @@ pub enum State {
 
 #[derive(Clone, Debug)]
 enum Operation {
-    SetBlackIfLeftmostAndRightmostIntersect(usize, usize),
-    SetWhiteIfPossibleIdIsEmpty(usize, usize),
-    SetBlackIfLeftEndIsConfirmed(usize, usize),
-    SetBlackIfRightEndIsConfirmed(usize, usize),
-    SetBlackIfBothEndIsConfirmed(usize, usize),
-    SetWhiteIfTheLengthIsConfirmed(usize, usize),
-    SetWhiteIfTooLong(usize),
-    SetWhiteIfTooShort(usize, usize),
-    SetSameStateAsOrthogonal,
+    BlackIfLeftmostAndRightmostIntersect(usize, usize),
+    WhiteIfPossibleIdIsEmpty(usize, usize),
+    BlackIfLeftEndIsConfirmed(usize, usize),
+    BlackIfRightEndIsConfirmed(usize, usize),
+    BlackIfBothEndIsConfirmed(usize, usize),
+    WhiteIfTheLengthIsConfirmed(usize, usize),
+    WhiteIfTooLong(usize),
+    WhiteIfTooShort(usize, usize),
+    SameStateAsOrthogonal,
 }
 impl Display for Operation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -80,14 +70,9 @@ impl Line {
         !self.updates.is_empty()
     }
     fn description(&self, j: usize, by: Operation) {}
-    fn set_range(
-        &mut self,
-        range: Range<usize>,
-        state: State,
-        by: Operation,
-    ) -> Result<(), SolverError> {
+    fn set_range(&mut self, range: Range<usize>, state: State, by: Operation) {
         if range.is_empty() {
-            return Ok(());
+            return;
         }
         let mut updated_segment = Segments::new();
         for j in range.clone() {
@@ -96,14 +81,10 @@ impl Line {
                 (State::Unconfirmed, State::White) => {}
                 (State::Unconfirmed, State::Black) => {}
 
-                (State::White, State::Unconfirmed | State::Black) => {
-                    return Err(SolverError::InternalError)
-                }
+                (State::White, State::Unconfirmed | State::Black) => unreachable!(),
                 (State::White, State::White) => continue,
 
-                (State::Black, State::Unconfirmed | State::White) => {
-                    return Err(SolverError::InternalError)
-                }
+                (State::Black, State::Unconfirmed | State::White) => unreachable!(),
                 (State::Black, State::Black) => continue,
             };
             self.states[j] = state;
@@ -134,14 +115,13 @@ impl Line {
                 }
             }
         }
-        if !matches!(by, Operation::SetSameStateAsOrthogonal) {
+        if !matches!(by, Operation::SameStateAsOrthogonal) {
             for (l, r) in updated_segment.segments() {
                 self.updates.push_back((l..r, state, by.clone()));
             }
         }
-        Ok(())
     }
-    fn set(&mut self, j: usize, state: State, by: Operation) -> Result<(), SolverError> {
+    fn set(&mut self, j: usize, state: State, by: Operation) {
         self.set_range(j..j + 1, state, by)
     }
     fn confirmed_id(&self, j: usize) -> Option<usize> {
@@ -151,26 +131,25 @@ impl Line {
             None
         }
     }
-    fn solve(&mut self) -> Result<(), SolverError> {
+    fn solve(&mut self) {
         loop {
             let (prev_states, prev_possible_id) = (self.states.clone(), self._possible_id.clone());
-            self.update_possible_id()?;
-            self.set_black_if_leftmost_and_rightmost_intersect()?;
-            self.set_white_if_possible_id_is_empty()?;
-            self.set_black_if_left_end_is_confirmed()?;
-            self.set_black_if_right_end_is_confirmed()?;
-            self.set_black_if_both_end_is_confirmed()?;
-            self.set_white_if_the_length_is_confirmed()?;
-            self.set_white_if_too_long()?;
-            self.set_white_if_too_short()?;
+            self.update_possible_id();
+            self.set_black_if_leftmost_and_rightmost_intersect();
+            self.set_white_if_possible_id_is_empty();
+            self.set_black_if_left_end_is_confirmed();
+            self.set_black_if_right_end_is_confirmed();
+            self.set_black_if_both_end_is_confirmed();
+            self.set_white_if_the_length_is_confirmed();
+            self.set_white_if_too_long();
+            self.set_white_if_too_short();
             if prev_states == self.states && prev_possible_id == self._possible_id {
                 break;
             }
         }
-        Ok(())
     }
 
-    fn update_possible_id(&mut self) -> Result<(), SolverError> {
+    fn update_possible_id(&mut self) {
         let (n, m) = (self.n, self.hint.len());
         /* 左に寄せる */
         let mut ls = vec![0; m];
@@ -248,10 +227,8 @@ impl Line {
             self.possible_id(j)
                 .for_each(|id| self.possible_size[j].insert(self.hint[id]));
         }
-
-        Ok(())
     }
-    fn set_black_if_leftmost_and_rightmost_intersect(&mut self) -> Result<(), SolverError> {
+    fn set_black_if_leftmost_and_rightmost_intersect(&mut self) {
         let m = self.hint.len();
         for id in 0..m {
             let (l, r) = self.id_range[id];
@@ -259,12 +236,11 @@ impl Line {
             self.set_range(
                 l..r,
                 State::Black,
-                Operation::SetBlackIfLeftmostAndRightmostIntersect(l, r),
-            )?;
+                Operation::BlackIfLeftmostAndRightmostIntersect(l, r),
+            );
         }
-        Ok(())
     }
-    fn set_white_if_possible_id_is_empty(&mut self) -> Result<(), SolverError> {
+    fn set_white_if_possible_id_is_empty(&mut self) {
         let mut l = 0;
         while l < self.n {
             l = (l..self.n)
@@ -276,13 +252,12 @@ impl Line {
             self.set_range(
                 l..r,
                 State::White,
-                Operation::SetWhiteIfPossibleIdIsEmpty(l, r),
-            )?;
+                Operation::WhiteIfPossibleIdIsEmpty(l, r),
+            );
             l = r;
         }
-        Ok(())
     }
-    fn set_black_if_left_end_is_confirmed(&mut self) -> Result<(), SolverError> {
+    fn set_black_if_left_end_is_confirmed(&mut self) {
         for (j, _) in self.segments_black.segments() {
             let l = self.segments_non_white.left(j);
             let r_max = self.segments_non_white.right(j);
@@ -302,12 +277,11 @@ impl Line {
             self.set_range(
                 j..r,
                 State::Black,
-                Operation::SetBlackIfLeftEndIsConfirmed(l, r),
-            )?;
+                Operation::BlackIfLeftEndIsConfirmed(l, r),
+            );
         }
-        Ok(())
     }
-    fn set_black_if_right_end_is_confirmed(&mut self) -> Result<(), SolverError> {
+    fn set_black_if_right_end_is_confirmed(&mut self) {
         for (_, j) in self.segments_black.segments() {
             let j = j - 1;
             let r = self.segments_non_white.right(j);
@@ -328,12 +302,11 @@ impl Line {
             self.set_range(
                 l..j,
                 State::Black,
-                Operation::SetBlackIfRightEndIsConfirmed(l, r),
-            )?;
+                Operation::BlackIfRightEndIsConfirmed(l, r),
+            );
         }
-        Ok(())
     }
-    fn set_black_if_both_end_is_confirmed(&mut self) -> Result<(), SolverError> {
+    fn set_black_if_both_end_is_confirmed(&mut self) {
         for (l, r) in self.segments_non_white.segments() {
             if (l..r).all(|j| self.states[j] == State::Unconfirmed) {
                 continue;
@@ -346,13 +319,12 @@ impl Line {
                 self.set_range(
                     l..r,
                     State::Black,
-                    Operation::SetBlackIfBothEndIsConfirmed(l, r),
-                )?;
+                    Operation::BlackIfBothEndIsConfirmed(l, r),
+                );
             }
         }
-        Ok(())
     }
-    fn set_white_if_the_length_is_confirmed(&mut self) -> Result<(), SolverError> {
+    fn set_white_if_the_length_is_confirmed(&mut self) {
         for (l, r) in self.segments_black.segments() {
             if (l == 0 || self.states[l] == State::White)
                 && (r == self.n || self.states[r] == State::White)
@@ -368,23 +340,22 @@ impl Line {
                         self.set(
                             l - 1,
                             State::White,
-                            Operation::SetWhiteIfTheLengthIsConfirmed(l, r),
-                        )?;
+                            Operation::WhiteIfTheLengthIsConfirmed(l, r),
+                        );
                     }
                     if r < self.n {
                         self.set(
                             r,
                             State::White,
-                            Operation::SetWhiteIfTheLengthIsConfirmed(l, r),
-                        )?;
+                            Operation::WhiteIfTheLengthIsConfirmed(l, r),
+                        );
                     }
                     break;
                 }
             }
         }
-        Ok(())
     }
-    fn set_white_if_too_long(&mut self) -> Result<(), SolverError> {
+    fn set_white_if_too_long(&mut self) {
         for j in 0..self.n {
             if !(self.states[j] == State::Unconfirmed && self.possible_id(j).len() == 1) {
                 continue;
@@ -398,12 +369,11 @@ impl Line {
                 size += self.segments_black.size(j + 1);
             }
             if size > self.hint[id] {
-                self.set(j, State::White, Operation::SetWhiteIfTooLong(j))?;
+                self.set(j, State::White, Operation::WhiteIfTooLong(j));
             }
         }
-        Ok(())
     }
-    fn set_white_if_too_short(&mut self) -> Result<(), SolverError> {
+    fn set_white_if_too_short(&mut self) {
         for (l, r) in self.segments_unconfirmed.segments() {
             if l > 0 && self.states[l - 1] != State::White {
                 continue;
@@ -412,10 +382,9 @@ impl Line {
                 continue;
             }
             if (l..r).any(|j| self.possible_size[j].min().unwrap_or(0) > r - l) {
-                self.set_range(l..r, State::White, Operation::SetWhiteIfTooShort(l, r))?;
+                self.set_range(l..r, State::White, Operation::WhiteIfTooShort(l, r));
             }
         }
-        Ok(())
     }
 }
 impl Display for Line {
@@ -474,28 +443,24 @@ impl Solver {
         }
     }
 
-    pub fn solve(&mut self) -> Result<(), SolverError> {
+    pub fn solve(&mut self) -> bool {
         self.queue = (0..2)
             .flat_map(|axis| (0..self.n).map(move |i| (axis, i)))
             .collect();
         while let Some((axis, i)) = self.queue.pop_front() {
-            self.lines[axis][i].solve()?;
+            self.lines[axis][i].solve();
             while let Some((range, state, by)) = self.lines[axis][i].get_update() {
                 self.history.push_back(((axis, i, range.clone()), by));
                 for j in range {
-                    self.lines[axis ^ 1][j].set(i, state, Operation::SetSameStateAsOrthogonal)?;
+                    self.lines[axis ^ 1][j].set(i, state, Operation::SameStateAsOrthogonal);
                     self.queue.push_back((axis ^ 1, j));
                 }
             }
         }
-        if self.lines[0]
+        self.lines[0]
             .iter()
             .flat_map(|segment| segment.states.clone())
-            .any(|state| matches!(state, State::Unconfirmed))
-        {
-            return Err(SolverError::Unsolvable);
-        }
-        Ok(())
+            .all(|state| !matches!(state, State::Unconfirmed))
     }
 
     // 一度 solve() を呼んでから使う。
@@ -504,7 +469,7 @@ impl Solver {
 
     fn description(&self, axis: usize, i: usize, j: usize, by: Operation) {
         match by {
-            Operation::SetSameStateAsOrthogonal => {
+            Operation::SameStateAsOrthogonal => {
                 todo!();
             }
             _ => self.lines[axis][i].description(j, by),
@@ -682,9 +647,9 @@ mod tests {
 
         // .xoo.
         let mut line = Line::new(5, vec![1, 2]);
-        line.set(1, State::White, Operation::SetSameStateAsOrthogonal);
-        line.set(2, State::Black, Operation::SetSameStateAsOrthogonal);
-        line.set(3, State::Black, Operation::SetSameStateAsOrthogonal);
+        line.set(1, State::White, Operation::SameStateAsOrthogonal);
+        line.set(2, State::Black, Operation::SameStateAsOrthogonal);
+        line.set(3, State::Black, Operation::SameStateAsOrthogonal);
         line.update_possible_id();
         line.set_black_if_leftmost_and_rightmost_intersect();
 
@@ -714,13 +679,13 @@ mod tests {
 
         // ....xoo.oo....x..x..
         let mut line = Line::new(20, vec![1, 2, 5, 1, 1]);
-        line.set(4, State::White, Operation::SetSameStateAsOrthogonal);
-        line.set(5, State::Black, Operation::SetSameStateAsOrthogonal);
-        line.set(6, State::Black, Operation::SetSameStateAsOrthogonal);
-        line.set(8, State::Black, Operation::SetSameStateAsOrthogonal);
-        line.set(9, State::Black, Operation::SetSameStateAsOrthogonal);
-        line.set(14, State::White, Operation::SetSameStateAsOrthogonal);
-        line.set(17, State::White, Operation::SetSameStateAsOrthogonal);
+        line.set(4, State::White, Operation::SameStateAsOrthogonal);
+        line.set(5, State::Black, Operation::SameStateAsOrthogonal);
+        line.set(6, State::Black, Operation::SameStateAsOrthogonal);
+        line.set(8, State::Black, Operation::SameStateAsOrthogonal);
+        line.set(9, State::Black, Operation::SameStateAsOrthogonal);
+        line.set(14, State::White, Operation::SameStateAsOrthogonal);
+        line.set(17, State::White, Operation::SameStateAsOrthogonal);
         for _ in 0..2 {
             line.update_possible_id();
             line.set_black_if_leftmost_and_rightmost_intersect();
@@ -759,8 +724,8 @@ mod tests {
     fn test_set_white_if_the_length_is_confirmed() {
         // ....oo....
         let mut line = Line::new(10, vec![2, 2]);
-        line.set(4, State::Black, Operation::SetSameStateAsOrthogonal);
-        line.set(5, State::Black, Operation::SetSameStateAsOrthogonal);
+        line.set(4, State::Black, Operation::SameStateAsOrthogonal);
+        line.set(5, State::Black, Operation::SameStateAsOrthogonal);
         line.set_white_if_the_length_is_confirmed();
         assert_eq!(line.states[3], State::White);
         assert_eq!(line.states[6], State::White);
@@ -770,8 +735,8 @@ mod tests {
     fn test_set_white_if_possible_id_is_empty() {
         // .o......o.
         let mut line = Line::new(10, vec![2, 2]);
-        line.set(1, State::Black, Operation::SetSameStateAsOrthogonal);
-        line.set(8, State::Black, Operation::SetSameStateAsOrthogonal);
+        line.set(1, State::Black, Operation::SameStateAsOrthogonal);
+        line.set(8, State::Black, Operation::SameStateAsOrthogonal);
         line.update_possible_id();
         line.set_black_if_leftmost_and_rightmost_intersect();
         line.set_white_if_possible_id_is_empty();
@@ -797,8 +762,8 @@ mod tests {
     fn test_set_black_if_left_end_is_confirmed() {
         // ....xo....
         let mut line = Line::new(10, vec![2, 2]);
-        line.set(4, State::White, Operation::SetSameStateAsOrthogonal);
-        line.set(5, State::Black, Operation::SetSameStateAsOrthogonal);
+        line.set(4, State::White, Operation::SameStateAsOrthogonal);
+        line.set(5, State::Black, Operation::SameStateAsOrthogonal);
         line.set_black_if_left_end_is_confirmed();
         assert_eq!(
             line.states,
@@ -819,11 +784,11 @@ mod tests {
         assert_eq!(line.confirmed_id(6), None);
 
         let mut line = Line::new(30, vec![2, 6, 5, 2, 1]);
-        line.set(0, State::Black, Operation::SetSameStateAsOrthogonal);
-        line.set(1, State::Black, Operation::SetSameStateAsOrthogonal);
-        line.set(2, State::White, Operation::SetSameStateAsOrthogonal);
-        line.set(9, State::White, Operation::SetSameStateAsOrthogonal);
-        line.set(12, State::Black, Operation::SetSameStateAsOrthogonal);
+        line.set(0, State::Black, Operation::SameStateAsOrthogonal);
+        line.set(1, State::Black, Operation::SameStateAsOrthogonal);
+        line.set(2, State::White, Operation::SameStateAsOrthogonal);
+        line.set(9, State::White, Operation::SameStateAsOrthogonal);
+        line.set(12, State::Black, Operation::SameStateAsOrthogonal);
         line.update_possible_id();
         line.set_black_if_leftmost_and_rightmost_intersect();
         line.set_black_if_left_end_is_confirmed();
@@ -870,13 +835,13 @@ mod tests {
 
         // ....xoo.oo....x..x..
         let mut line = Line::new(20, vec![1, 2, 5, 1, 1]);
-        line.set(4, State::White, Operation::SetSameStateAsOrthogonal);
-        line.set(5, State::Black, Operation::SetSameStateAsOrthogonal);
-        line.set(6, State::Black, Operation::SetSameStateAsOrthogonal);
-        line.set(8, State::Black, Operation::SetSameStateAsOrthogonal);
-        line.set(9, State::Black, Operation::SetSameStateAsOrthogonal);
-        line.set(14, State::White, Operation::SetSameStateAsOrthogonal);
-        line.set(17, State::White, Operation::SetSameStateAsOrthogonal);
+        line.set(4, State::White, Operation::SameStateAsOrthogonal);
+        line.set(5, State::Black, Operation::SameStateAsOrthogonal);
+        line.set(6, State::Black, Operation::SameStateAsOrthogonal);
+        line.set(8, State::Black, Operation::SameStateAsOrthogonal);
+        line.set(9, State::Black, Operation::SameStateAsOrthogonal);
+        line.set(14, State::White, Operation::SameStateAsOrthogonal);
+        line.set(17, State::White, Operation::SameStateAsOrthogonal);
         line.update_possible_id();
         line.set_black_if_leftmost_and_rightmost_intersect();
         line.update_possible_id();
@@ -917,8 +882,8 @@ mod tests {
     fn test_set_black_if_right_end_is_confirmed() {
         // ....ox....
         let mut line = Line::new(10, vec![2, 2]);
-        line.set(4, State::Black, Operation::SetSameStateAsOrthogonal);
-        line.set(5, State::White, Operation::SetSameStateAsOrthogonal);
+        line.set(4, State::Black, Operation::SameStateAsOrthogonal);
+        line.set(5, State::White, Operation::SameStateAsOrthogonal);
         line.set_black_if_right_end_is_confirmed();
         assert_eq!(
             line.states,
@@ -940,8 +905,8 @@ mod tests {
 
         // .ox.......
         let mut line = Line::new(10, vec![2, 2]);
-        line.set(1, State::Black, Operation::SetSameStateAsOrthogonal);
-        line.set(2, State::White, Operation::SetSameStateAsOrthogonal);
+        line.set(1, State::Black, Operation::SameStateAsOrthogonal);
+        line.set(2, State::White, Operation::SameStateAsOrthogonal);
         line.set_black_if_right_end_is_confirmed();
         assert_eq!(
             line.states,
@@ -966,9 +931,9 @@ mod tests {
     fn test_set_black_if_both_end_is_confirmed() {
         // ...x.o.x...
         let mut line = Line::new(11, vec![3, 3]);
-        line.set(3, State::White, Operation::SetSameStateAsOrthogonal);
-        line.set(5, State::Black, Operation::SetSameStateAsOrthogonal);
-        line.set(7, State::White, Operation::SetSameStateAsOrthogonal);
+        line.set(3, State::White, Operation::SameStateAsOrthogonal);
+        line.set(5, State::Black, Operation::SameStateAsOrthogonal);
+        line.set(7, State::White, Operation::SameStateAsOrthogonal);
         line.set_black_if_both_end_is_confirmed();
         assert_eq!(
             line.states,
@@ -994,7 +959,7 @@ mod tests {
     fn test_set_white_if_too_long() {
         // ..o.......
         let mut line = Line::new(10, vec![1, 2]);
-        line.set(2, State::Black, Operation::SetSameStateAsOrthogonal);
+        line.set(2, State::Black, Operation::SameStateAsOrthogonal);
         line.update_possible_id();
         line.set_black_if_leftmost_and_rightmost_intersect();
         line.set_white_if_too_long();
@@ -1019,9 +984,9 @@ mod tests {
     fn test_set_white_if_too_short() {
         // .....ox.x......
         let mut line = Line::new(15, vec![1, 2, 2]);
-        line.set(5, State::Black, Operation::SetSameStateAsOrthogonal);
-        line.set(6, State::White, Operation::SetSameStateAsOrthogonal);
-        line.set(8, State::White, Operation::SetSameStateAsOrthogonal);
+        line.set(5, State::Black, Operation::SameStateAsOrthogonal);
+        line.set(6, State::White, Operation::SameStateAsOrthogonal);
+        line.set(8, State::White, Operation::SameStateAsOrthogonal);
         line.update_possible_id();
         line.set_black_if_leftmost_and_rightmost_intersect();
         line.set_white_if_too_short();

@@ -6,7 +6,7 @@ fn test_5x5() {
         vec![vec![2, 1], vec![3], vec![2, 2], vec![1, 2], vec![1, 1]],
         vec![vec![3, 1], vec![4], vec![1, 1], vec![2], vec![1, 2]],
     ]);
-    assert!(solver.solve().is_ok());
+    assert!(solver.solve());
     solver.judge();
 }
 #[test]
@@ -37,7 +37,7 @@ fn test_10x10() {
             vec![2, 3],
         ],
     ]);
-    assert!(solver.solve().is_ok());
+    assert!(solver.solve());
     assert!(solver.judge());
 }
 #[test]
@@ -78,7 +78,7 @@ fn test_15x15() {
             vec![2, 1, 1, 5],
         ],
     ]);
-    assert!(solver.solve().is_ok());
+    assert!(solver.solve());
     assert!(solver.judge());
 }
 
@@ -130,7 +130,7 @@ fn test_20x20() {
             vec![1, 1, 3, 1, 2, 1],
         ],
     ]);
-    assert!(solver.solve().is_ok());
+    assert!(solver.solve());
     assert!(solver.judge());
 }
 #[test]
@@ -201,7 +201,7 @@ fn test_30x30() {
             vec![4, 3],
         ],
     ]);
-    assert!(solver.solve().is_ok());
+    assert!(solver.solve());
     assert!(solver.judge());
 }
 #[test]
@@ -272,6 +272,6 @@ fn test_30x30_2() {
             vec![1, 4, 12, 1],
         ],
     ]);
-    assert!(solver.solve().is_ok());
+    assert!(solver.solve());
     assert!(solver.judge());
 }
