@@ -1,13 +1,33 @@
 use illu_logi_solver::*;
 
 #[test]
+fn test_no_solution() {
+    let mut solver = Solver::new([
+        vec![vec![], vec![3, 1], vec![], vec![], vec![]],
+        vec![vec![1, 3], vec![], vec![], vec![], vec![]],
+    ]);
+    let result = solver.solve();
+    assert!(result.is_err());
+    eprintln!("{solver}");
+    eprintln!("{}", result.err().unwrap());
+
+    let mut solver = Solver::new([
+        vec![vec![5], vec![1], vec![], vec![], vec![]],
+        vec![vec![5], vec![], vec![], vec![], vec![]],
+    ]);
+    let result = solver.solve();
+    assert!(result.is_err());
+    eprintln!("{solver}");
+    eprintln!("{}", result.err().unwrap());
+}
+
+#[test]
 fn test_5x5() {
     let mut solver = Solver::new([
         vec![vec![2, 1], vec![3], vec![2, 2], vec![1, 2], vec![1, 1]],
         vec![vec![3, 1], vec![4], vec![1, 1], vec![2], vec![1, 2]],
     ]);
-    assert!(solver.solve());
-    solver.judge();
+    assert!(solver.solve().is_ok());
 }
 #[test]
 fn test_10x10() {
@@ -37,8 +57,7 @@ fn test_10x10() {
             vec![2, 3],
         ],
     ]);
-    assert!(solver.solve());
-    assert!(solver.judge());
+    assert!(solver.solve().is_ok());
 }
 #[test]
 fn test_15x15() {
@@ -78,8 +97,7 @@ fn test_15x15() {
             vec![2, 1, 1, 5],
         ],
     ]);
-    assert!(solver.solve());
-    assert!(solver.judge());
+    assert!(solver.solve().is_ok());
 }
 
 #[test]
@@ -130,8 +148,7 @@ fn test_20x20() {
             vec![1, 1, 3, 1, 2, 1],
         ],
     ]);
-    assert!(solver.solve());
-    assert!(solver.judge());
+    assert!(solver.solve().is_ok());
 }
 #[test]
 fn test_30x30() {
@@ -201,8 +218,7 @@ fn test_30x30() {
             vec![4, 3],
         ],
     ]);
-    assert!(solver.solve());
-    assert!(solver.judge());
+    assert!(solver.solve().is_ok());
 }
 #[test]
 fn test_30x30_2() {
@@ -272,6 +288,57 @@ fn test_30x30_2() {
             vec![1, 4, 12, 1],
         ],
     ]);
-    assert!(solver.solve());
-    assert!(solver.judge());
+    assert!(solver.solve().is_ok());
+}
+
+#[test]
+fn test_15x20() {
+    let mut solver = Solver::new([
+        vec![
+            vec![1, 16],
+            vec![1, 1, 4, 3, 2],
+            vec![1, 1, 3, 3, 1],
+            vec![1, 2, 9],
+            vec![3, 2, 2, 2],
+            vec![5, 5, 3],
+            vec![3, 3, 7],
+            vec![5, 2, 3, 6],
+            vec![3, 1, 4, 6],
+            vec![5, 2, 3],
+            vec![3, 5, 6],
+            vec![5, 5, 5],
+            vec![3, 4, 2, 4],
+            vec![5, 3, 4, 3],
+            vec![3, 14],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        ],
+        vec![
+            vec![3, 1, 1, 1, 1, 1],
+            vec![11],
+            vec![14],
+            vec![11],
+            vec![3, 1, 1, 1, 1, 1],
+            vec![4],
+            vec![9, 4],
+            vec![2, 4, 5],
+            vec![1, 2, 6],
+            vec![1, 1, 5, 1],
+            vec![2, 2, 2, 2, 1],
+            vec![5, 3, 1, 2],
+            vec![4, 3, 3],
+            vec![1, 2, 2, 3],
+            vec![1, 1, 4, 1, 2],
+            vec![1, 1, 4, 2, 1],
+            vec![1, 1, 3, 3, 1],
+            vec![1, 1, 9],
+            vec![2, 2, 8],
+            vec![5, 8],
+        ],
+    ]);
+    assert!(solver.solve().is_ok());
+    eprintln!("{solver}");
 }

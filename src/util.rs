@@ -53,6 +53,9 @@ impl Segments {
     pub fn all(&self, l: usize, r: usize) -> bool {
         ((self._bit & ((1 << r) - 1)) >> l).count_ones() as usize == r - l
     }
+    pub fn is_empty(&self) -> bool {
+        self._bit == 0
+    }
     pub fn segments(&self) -> Vec<(usize, usize)> {
         let mut ret = Vec::new();
         let mut l = 0;
