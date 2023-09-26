@@ -601,7 +601,6 @@ impl Solver {
                     self.queue.push_back((axis.orthogonal(), j));
                 }
             }
-            eprintln!("{self}");
         }
         if self.lines[0]
             .iter()
