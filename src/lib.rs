@@ -42,13 +42,13 @@ pub enum State {
     Black,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum Operation {
     BlackIfLeftmostAndRightmostIntersect(usize, usize),
     WhiteIfPossibleIdIsEmpty(usize, usize),
+    BlackIfBothEndIsConfirmed(usize, usize),
     BlackIfLeftEndIsConfirmed(usize, usize),
     BlackIfRightEndIsConfirmed(usize, usize),
-    BlackIfBothEndIsConfirmed(usize, usize),
     WhiteIfTheLengthIsConfirmed(usize, usize),
     WhiteIfTooLong(usize),
     WhiteIfTooShort(usize, usize),
@@ -59,9 +59,9 @@ pub enum Operation {
 enum ExecutingOperation {
     BlackIfLeftmostAndRightmostIntersect,
     WhiteIfPossibleIdIsEmpty,
+    BlackIfBothEndIsConfirmed,
     BlackIfLeftEndIsConfirmed,
     BlackIfRightEndIsConfirmed,
-    BlackIfBothEndIsConfirmed,
     WhiteIfTheLengthIsConfirmed,
     WhiteIfTooLong,
     WhiteIfTooShort,
@@ -70,10 +70,10 @@ impl ExecutingOperation {
     fn advance(&mut self) {
         *self = match self {
             Self::BlackIfLeftmostAndRightmostIntersect => Self::WhiteIfPossibleIdIsEmpty,
-            Self::WhiteIfPossibleIdIsEmpty => Self::BlackIfLeftEndIsConfirmed,
+            Self::WhiteIfPossibleIdIsEmpty => Self::BlackIfBothEndIsConfirmed,
+            Self::BlackIfBothEndIsConfirmed => Self::BlackIfLeftEndIsConfirmed,
             Self::BlackIfLeftEndIsConfirmed => Self::BlackIfRightEndIsConfirmed,
-            Self::BlackIfRightEndIsConfirmed => Self::BlackIfBothEndIsConfirmed,
-            Self::BlackIfBothEndIsConfirmed => Self::WhiteIfTheLengthIsConfirmed,
+            Self::BlackIfRightEndIsConfirmed => Self::WhiteIfTheLengthIsConfirmed,
             Self::WhiteIfTheLengthIsConfirmed => Self::WhiteIfTooLong,
             Self::WhiteIfTooLong => Self::WhiteIfTooShort,
             Self::WhiteIfTooShort => Self::BlackIfLeftmostAndRightmostIntersect,
@@ -87,8 +87,15 @@ enum LineError {
 impl LineError {
     fn to_solver_error(&self, axis: Axis, i: usize) -> SolverError {
         match self {
-            LineError::Contradiction(j, prev_state, state, by) => {
-                SolverError::Contradiction(axis, i, *j, *prev_state, *state, by.clone())
+            LineError::Contradiction(j, current_state, new_state, by) => {
+                SolverError::Contradiction {
+                    axis,
+                    i,
+                    j: *j,
+                    current_state: *current_state,
+                    new_state: *new_state,
+                    by: *by,
+                }
             }
         }
     }
@@ -130,6 +137,9 @@ impl Line {
     fn possible_id(&self, j: usize) -> Range<usize> {
         self._possible_id[j].0..self._possible_id[j].1
     }
+    fn set(&mut self, j: usize, state: State, by: Operation) {
+        self.set_range(j..j + 1, state, by)
+    }
     fn set_range(&mut self, range: Range<usize>, state: State, by: Operation) {
         if range.is_empty() {
             return;
@@ -168,9 +178,6 @@ impl Line {
         }
         self.update_possible_id()?;
         Ok(())
-    }
-    fn set(&mut self, j: usize, state: State, by: Operation) {
-        self.set_range(j..j + 1, state, by)
     }
     fn set_state(&mut self, j: usize, state: State) {
         self.states[j] = state;
@@ -231,7 +238,7 @@ impl Line {
             }
         }
         if let Some((range, state, by)) = self.queue.pop_front() {
-            self.update(range.clone(), state, by.clone())?;
+            self.update(range.clone(), state, by)?;
             Ok(Some((range, state, by)))
         } else {
             Ok(None)
@@ -240,7 +247,7 @@ impl Line {
     #[cfg(test)]
     fn flush_queue(&mut self) -> Result<(), LineError> {
         while let Some((range, state, by)) = self.queue.pop_front() {
-            self.update(range.clone(), state, by.clone())?;
+            self.update(range.clone(), state, by)?;
         }
         Ok(())
     }
@@ -345,9 +352,6 @@ impl Line {
                 break;
             }
         }
-
-        // どこにも入らないidがないかチェックする
-        if self.id_range.iter().any(|&(l, r)| l >= r) {}
 
         for j in 0..n {
             self.possible_size[j].clear();
@@ -535,12 +539,27 @@ impl Display for Line {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Action {
+    pub axis: Axis,
+    pub i: usize,
+    pub range: Range<usize>,
+    pub state: State,
+    pub by: Operation,
+}
+
 #[derive(Debug, Error)]
 pub enum SolverError {
-    #[error("contradiction on {0:?}[{1}][{2}]: attempt to set {4:?} by {5:?}, but {3:?} is already set.")]
-    Contradiction(Axis, usize, usize, State, State, Operation),
-
-    #[error("todo")]
+    #[error("contradiction on {axis:?}[{i}][{j}]: attempt to set {new_state:?} by {by:?}, but {current_state:?} is already set.")]
+    Contradiction {
+        axis: Axis,
+        i: usize,
+        j: usize,
+        current_state: State,
+        new_state: State,
+        by: Operation,
+    },
+    #[error("could not find a solution: there might be multiple possible solutions.")]
     MultipleSolutions,
 }
 
@@ -548,7 +567,6 @@ pub struct Solver {
     n: usize,
     lines: [Vec<Line>; 2],
     queue: VecDeque<(Axis, usize)>,
-    history: VecDeque<((Axis, usize, Range<usize>), State, Operation)>,
 }
 impl Solver {
     pub fn new(hints: [Vec<Vec<usize>>; 2]) -> Self {
@@ -564,28 +582,18 @@ impl Solver {
                 .map(|hint| Line::new(n, hint.clone()))
                 .collect(),
         ];
-        let queue = VecDeque::new();
-        let history = VecDeque::new();
-        Self {
-            n,
-            lines,
-            queue,
-            history,
-        }
+        let queue = (0..2)
+            .flat_map(|axis| (0..n).map(move |i| (axis.into(), i)))
+            .collect();
+        Self { n, lines, queue }
     }
 
     pub fn solve(&mut self) -> Result<(), SolverError> {
-        self.queue = (0..2)
-            .flat_map(|axis| (0..self.n).map(move |i| (axis.into(), i)))
-            .collect();
-        self.history.clear();
         while let Some((axis, i)) = self.queue.pop_front() {
-            while let Some((range, state, by)) = self.lines[axis as usize][i]
+            while let Some((range, state, _by)) = self.lines[axis as usize][i]
                 .advance()
                 .map_err(|err| err.to_solver_error(axis, i))?
             {
-                self.history
-                    .push_back(((axis, i, range.clone()), state, by));
                 for j in range {
                     self.lines[axis.orthogonal() as usize][j]
                         .update(i..i + 1, state, Operation::SameStateAsOrthogonal)
@@ -593,6 +601,7 @@ impl Solver {
                     self.queue.push_back((axis.orthogonal(), j));
                 }
             }
+            eprintln!("{self}");
         }
         if self.lines[0]
             .iter()
@@ -604,6 +613,32 @@ impl Solver {
             assert!(self.judge());
             Ok(())
         }
+    }
+
+    pub fn advance(&mut self) -> Result<Option<Action>, SolverError> {
+        while let Some(&(axis, i)) = self.queue.front() {
+            if let Some((range, state, by)) = self.lines[axis as usize][i]
+                .advance()
+                .map_err(|err| err.to_solver_error(axis, i))?
+            {
+                for j in range.clone() {
+                    self.lines[axis.orthogonal() as usize][j]
+                        .update(i..i + 1, state, Operation::SameStateAsOrthogonal)
+                        .map_err(|err| err.to_solver_error(axis, i))?;
+                    self.queue.push_back((axis.orthogonal(), j));
+                }
+                return Ok(Some(Action {
+                    axis,
+                    i,
+                    range,
+                    state,
+                    by,
+                }));
+            } else {
+                self.queue.pop_front().unwrap();
+            }
+        }
+        Ok(None)
     }
 
     fn judge(&self) -> bool {
@@ -639,8 +674,16 @@ impl Solver {
         true
     }
 
-    pub fn get_state(&self, y: usize, x: usize) -> State {
-        self.lines[0][y].states[x]
+    pub fn set(&mut self, axis: Axis, i: usize, j: usize, state: State) {
+        self.lines[axis as usize][i].set_state(j, state);
+    }
+
+    pub fn state(&self, axis: Axis, i: usize, j: usize) -> State {
+        self.lines[axis as usize][i].states[j]
+    }
+
+    pub fn possible_id(&self, axis: Axis, i: usize, j: usize) -> Range<usize> {
+        self.lines[axis as usize][i].possible_id(j)
     }
 }
 
@@ -680,13 +723,7 @@ impl std::fmt::Display for Solver {
                     match self.lines[0][y].states[x] {
                         State::Unconfirmed => ".".to_string(),
                         State::White => "x".to_string(),
-                        State::Black => {
-                            if let Some(id) = self.lines[0][y].confirmed_id(x) {
-                                format!("{id}")
-                            } else {
-                                "o".to_string()
-                            }
-                        }
+                        State::Black => "o".to_string(),
                     }
                 )?
             }
@@ -720,9 +757,15 @@ impl std::fmt::Display for Solver {
                     f,
                     "{}",
                     match self.lines[0][y].states[x] {
-                        State::Unconfirmed => "?".to_string(),
-                        State::White => ".".to_string(),
-                        State::Black => "o".to_string(),
+                        State::Unconfirmed => ".".to_string(),
+                        State::White => "x".to_string(),
+                        State::Black => {
+                            if let Some(id) = self.lines[0][y].confirmed_id(x) {
+                                format!("{id}")
+                            } else {
+                                "o".to_string()
+                            }
+                        }
                     }
                 )?
             }
