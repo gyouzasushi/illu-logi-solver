@@ -674,12 +674,17 @@ impl Solver {
         true
     }
 
-    pub fn set(&mut self, axis: Axis, i: usize, j: usize, state: State) {
-        self.lines[axis as usize][i].set_state(j, state);
+    pub fn set(&mut self, i: usize, j: usize, state: State) {
+        self.lines[Axis::Row as usize][i].set_state(j, state);
+        self.lines[Axis::Column as usize][j].set_state(i, state);
     }
 
-    pub fn state(&self, axis: Axis, i: usize, j: usize) -> State {
-        self.lines[axis as usize][i].states[j]
+    pub fn state(&self, i: usize, j: usize) -> State {
+        assert_eq!(
+            self.lines[Axis::Row as usize][i].states[j],
+            self.lines[Axis::Column as usize][j].states[i]
+        );
+        self.lines[Axis::Row as usize][i].states[j]
     }
 
     pub fn possible_id(&self, axis: Axis, i: usize, j: usize) -> Range<usize> {
