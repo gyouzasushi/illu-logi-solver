@@ -565,8 +565,11 @@ pub enum SolverError {
 
 pub struct Solver {
     n: usize,
+    hints: [Vec<Vec<usize>>; 2],
     lines: [Vec<Line>; 2],
     queue: VecDeque<(Axis, usize)>,
+    _turn: usize,
+    _max_turn: usize,
 }
 impl Solver {
     pub fn new(hints: [Vec<Vec<usize>>; 2]) -> Self {
@@ -585,10 +588,35 @@ impl Solver {
         let queue = (0..2)
             .flat_map(|axis| (0..n).map(move |i| (axis.into(), i)))
             .collect();
-        Self { n, lines, queue }
+        Self {
+            n,
+            hints,
+            lines,
+            queue,
+            _turn: 0,
+            _max_turn: 0,
+        }
+    }
+
+    fn clear(&mut self) {
+        self.lines = [
+            self.hints[0]
+                .iter()
+                .map(|hint| Line::new(self.n, hint.clone()))
+                .collect(),
+            self.hints[1]
+                .iter()
+                .map(|hint| Line::new(self.n, hint.clone()))
+                .collect(),
+        ];
+        self.queue = (0..2)
+            .flat_map(|axis| (0..self.n).map(move |i| (axis.into(), i)))
+            .collect();
+        self._turn = 0;
     }
 
     pub fn solve(&mut self) -> Result<(), SolverError> {
+        self._max_turn = 0;
         while let Some((axis, i)) = self.queue.pop_front() {
             while let Some((range, state, _by)) = self.lines[axis as usize][i]
                 .advance()
@@ -614,6 +642,18 @@ impl Solver {
         }
     }
 
+    pub fn rollback(&mut self, t: usize) -> Result<Option<Action>, SolverError> {
+        let t = t.min(self._max_turn);
+        if self._turn > t {
+            self.clear();
+        }
+        let mut ret = None;
+        while self._turn < t {
+            ret = self.advance()?;
+        }
+        Ok(ret)
+    }
+
     pub fn advance(&mut self) -> Result<Option<Action>, SolverError> {
         while let Some(&(axis, i)) = self.queue.front() {
             if let Some((range, state, by)) = self.lines[axis as usize][i]
@@ -626,6 +666,7 @@ impl Solver {
                         .map_err(|err| err.to_solver_error(axis, i))?;
                     self.queue.push_back((axis.orthogonal(), j));
                 }
+                self._max_turn += 1;
                 return Ok(Some(Action {
                     axis,
                     i,
