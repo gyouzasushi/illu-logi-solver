@@ -681,6 +681,13 @@ impl Solver {
         Ok(None)
     }
 
+    pub fn turn(&self) -> usize {
+        self._turn
+    }
+    pub fn max_turn(&self) -> usize {
+        self._max_turn
+    }
+
     fn judge(&self) -> bool {
         for i in 0..self.n {
             for j in 0..self.n {
