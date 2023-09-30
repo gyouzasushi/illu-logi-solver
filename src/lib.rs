@@ -619,6 +619,7 @@ impl Solver {
                 .advance()
                 .map_err(|err| err.to_solver_error(axis, i))?
             {
+                self._turn += 1;
                 for j in range {
                     self.lines[axis.orthogonal() as usize][j]
                         .update(i..i + 1, state, Operation::SameStateAsOrthogonal)

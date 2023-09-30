@@ -149,6 +149,7 @@ fn test_20x20() {
         ],
     ]);
     assert!(solver.solve().is_ok());
+    eprintln!("{}", solver.turn());
 }
 
 #[test]
@@ -216,4 +217,36 @@ fn test_advance() {
         eprintln!("set {state:?} on {axis:?}[{i}][{range}] by {by:?}");
         eprintln!("{solver}");
     }
+}
+
+#[test]
+fn test_rollback() {
+    let mut solver = Solver::new([
+        vec![
+            vec![5, 1],
+            vec![2, 3],
+            vec![2, 2, 1],
+            vec![3, 2, 2],
+            vec![1, 3, 1],
+            vec![2, 3],
+            vec![1, 3, 1],
+            vec![1, 1, 2, 2],
+            vec![1, 6, 1],
+            vec![5, 2],
+        ],
+        vec![
+            vec![1, 2, 2],
+            vec![7],
+            vec![2, 1, 1, 2],
+            vec![1, 1, 4],
+            vec![2, 1, 1, 2],
+            vec![9],
+            vec![3, 1, 3],
+            vec![3, 1],
+            vec![1, 1, 1, 1],
+            vec![2, 3],
+        ],
+    ]);
+    solver.rollback(3);
+    eprintln!("{}", solver);
 }
