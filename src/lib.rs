@@ -628,6 +628,7 @@ impl Solver {
                         .map_err(|err| err.to_solver_error(axis, i))?;
                     self.queue.push_back((axis.orthogonal(), j));
                 }
+                self._max_turn += 1;
             }
         }
         if self.lines[0]
@@ -666,7 +667,7 @@ impl Solver {
                         .map_err(|err| err.to_solver_error(axis, i))?;
                     self.queue.push_back((axis.orthogonal(), j));
                 }
-                self._max_turn += 1;
+                self._turn += 1;
                 return Ok(Some(Action {
                     axis,
                     i,
