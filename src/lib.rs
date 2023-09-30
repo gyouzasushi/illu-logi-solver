@@ -569,7 +569,6 @@ pub struct Solver {
     lines: [Vec<Line>; 2],
     queue: VecDeque<(Axis, usize)>,
     _turn: usize,
-    _max_turn: usize,
 }
 impl Solver {
     pub fn new(hints: [Vec<Vec<usize>>; 2]) -> Self {
@@ -594,7 +593,6 @@ impl Solver {
             lines,
             queue,
             _turn: 0,
-            _max_turn: 0,
         }
     }
 
@@ -616,7 +614,6 @@ impl Solver {
     }
 
     pub fn solve(&mut self) -> Result<(), SolverError> {
-        self._max_turn = 0;
         while let Some((axis, i)) = self.queue.pop_front() {
             while let Some((range, state, _by)) = self.lines[axis as usize][i]
                 .advance()
@@ -628,7 +625,6 @@ impl Solver {
                         .map_err(|err| err.to_solver_error(axis, i))?;
                     self.queue.push_back((axis.orthogonal(), j));
                 }
-                self._max_turn += 1;
             }
         }
         if self.lines[0]
@@ -644,13 +640,15 @@ impl Solver {
     }
 
     pub fn rollback(&mut self, t: usize) -> Result<Option<Action>, SolverError> {
-        let t = t.min(self._max_turn);
         if self._turn > t {
             self.clear();
         }
         let mut ret = None;
         while self._turn < t {
             ret = self.advance()?;
+            if ret.is_none() {
+                break;
+            }
         }
         Ok(ret)
     }
@@ -684,9 +682,6 @@ impl Solver {
 
     pub fn turn(&self) -> usize {
         self._turn
-    }
-    pub fn max_turn(&self) -> usize {
-        self._max_turn
     }
 
     fn judge(&self) -> bool {
