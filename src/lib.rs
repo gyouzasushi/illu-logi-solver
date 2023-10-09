@@ -229,11 +229,11 @@ impl Line {
         self.next_operation.advance();
     }
     fn advance(&mut self) -> Result<Option<(Range<usize>, State, Operation)>, LineError> {
-        let initial_operation = self.next_operation.clone();
+        self.next_operation = ExecutingOperation::BlackIfLeftmostAndRightmostIntersect;
         self.update_possible_id()?;
         while !self.has_update() {
             self.execute_operation();
-            if self.next_operation == initial_operation {
+            if self.next_operation == ExecutingOperation::BlackIfLeftmostAndRightmostIntersect {
                 break;
             }
         }
@@ -365,7 +365,8 @@ impl Line {
         let m = self.hint.len();
         for id in 0..m {
             let (l, r) = self.id_range[id];
-            if l >= r {
+            // ここでエラーを返すべきかも　詰んでいるので
+            if r < l + self.hint[id] {
                 continue;
             }
             let (l, r) = (r - self.hint[id], l + self.hint[id]);
