@@ -4,7 +4,7 @@ use crate::util::{BitSet, Segments, SetMinMax};
 use std::{collections::VecDeque, fmt::Display, ops::Range};
 use thiserror::Error;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Axis {
     Row,
     Column,
@@ -365,7 +365,6 @@ impl Line {
         let m = self.hint.len();
         for id in 0..m {
             let (l, r) = self.id_range[id];
-            // ここでエラーを返すべきかも　詰んでいるので
             if r < l + self.hint[id] {
                 continue;
             }
@@ -636,7 +635,6 @@ impl Solver {
         {
             Err(SolverError::MultipleSolutions)
         } else {
-            assert!(self.judge());
             Ok(())
         }
     }
@@ -686,16 +684,7 @@ impl Solver {
         self._turn
     }
 
-    fn judge(&self) -> bool {
-        for i in 0..self.n {
-            for j in 0..self.n {
-                if (self.lines[0][i].states[j] == State::White)
-                    ^ (self.lines[1][j].states[i] == State::White)
-                {
-                    return false;
-                }
-            }
-        }
+    pub fn judge(&self) -> bool {
         for i in 0..self.n {
             let v = self.lines[Axis::Row as usize][i]
                 .segments_black
