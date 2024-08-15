@@ -118,15 +118,15 @@ struct Line {
 impl Line {
     fn new(n: usize, hint: Vec<usize>) -> Self {
         let m = hint.len();
-        let mut possible_size = BitSet::new();
+        let mut possible_size = BitSet::new(vec![false; n]);
         (0..m).for_each(|id| possible_size.insert(hint[id]));
         Self {
             n,
             hint,
             states: vec![State::Unconfirmed; n],
-            segments_black: Segments::new(),
-            segments_non_white: Segments::new().initialize(n),
-            segments_unconfirmed: Segments::new().initialize(n),
+            segments_black: Segments::new(vec![false; n]),
+            segments_non_white: Segments::new(vec![true; n]),
+            segments_unconfirmed: Segments::new(vec![true; n]),
             _possible_id: vec![(0, m); n],
             possible_size: vec![possible_size; n],
             id_range: vec![(0, n); m],

@@ -20,23 +20,27 @@ where
     }
 }
 
-const SIZE: usize = 32;
 #[derive(Clone)]
 pub struct Segments {
-    _bit: u32,
+    exist: Vec<bool>,
 }
 impl Segments {
-    pub fn new() -> Self {
-        Self { _bit: 0 }
-    }
-    pub fn initialize(self, n: usize) -> Self {
-        Self { _bit: (1 << n) - 1 }
+    pub fn new(exist: Vec<bool>) -> Self {
+        Self { exist }
     }
     pub fn left(&self, i: usize) -> usize {
-        SIZE - (self._bit | (!((1 << (i + 1)) - 1))).leading_ones() as usize
+        let mut l = i;
+        while l > 0 && self.exist[l - 1] {
+            l -= 1;
+        }
+        l
     }
     pub fn right(&self, i: usize) -> usize {
-        (self._bit >> i).trailing_ones() as usize + i
+        let mut r = i;
+        while r < self.exist.len() && self.exist[r] {
+            r += 1;
+        }
+        r
     }
     pub fn left_right(&self, i: usize) -> (usize, usize) {
         (self.left(i), self.right(i))
@@ -45,26 +49,28 @@ impl Segments {
         self.right(i) - self.left(i)
     }
     pub fn insert(&mut self, i: usize) {
-        self._bit |= 1 << i;
+        self.exist[i] = true;
     }
     pub fn erase(&mut self, i: usize) {
-        self._bit &= u32::MAX ^ 1 << i;
+        self.exist[i] = false;
     }
     pub fn all(&self, l: usize, r: usize) -> bool {
-        ((self._bit & ((1 << r) - 1)) >> l).count_ones() as usize == r - l
+        self.exist.iter().take(r).skip(l).all(|&x| x)
     }
     pub fn is_empty(&self) -> bool {
-        self._bit == 0
+        self.exist.iter().all(|&x| !x)
     }
     pub fn segments(&self) -> Vec<(usize, usize)> {
         let mut ret = Vec::new();
         let mut l = 0;
-        while l < SIZE {
-            l = l + (self._bit >> l).trailing_zeros() as usize;
-            if l >= SIZE {
+        while l < self.exist.len() {
+            while l < self.exist.len() && !self.exist[l] {
+                l += 1;
+            }
+            if l == self.exist.len() {
                 break;
             }
-            let r = l + (self._bit >> l).trailing_ones() as usize;
+            let r = self.right(l);
             ret.push((l, r));
             l = r;
         }
@@ -74,39 +80,35 @@ impl Segments {
 
 #[derive(Clone)]
 pub struct BitSet {
-    _bit: u32,
+    exist: Vec<bool>,
 }
 impl BitSet {
-    pub fn new() -> Self {
-        Self { _bit: 0 }
+    pub fn new(exist: Vec<bool>) -> Self {
+        Self { exist }
     }
     pub fn insert(&mut self, i: usize) {
-        self._bit |= 1 << i;
+        self.exist[i] = true;
     }
     pub fn clear(&mut self) {
-        self._bit = 0;
+        self.exist = self.exist.iter().map(|_| false).collect()
     }
     pub fn min(&self) -> Option<usize> {
-        if self._bit == 0 {
-            None
-        } else {
-            Some(self._bit.trailing_zeros() as usize)
-        }
+        self.exist.iter().position(|x| *x)
     }
     pub fn contains(&self, i: &usize) -> bool {
-        (self._bit >> i & 1) == 1
+        self.exist[*i]
     }
     pub fn count_ge(&self, i: &usize) -> usize {
-        (self._bit >> i).count_ones() as usize
+        self.exist.iter().skip(*i).filter(|&&x| x).count()
     }
     pub fn count_gt(&self, i: &usize) -> usize {
-        self.count_ge(i) - (self._bit >> i & 1) as usize
+        self.count_ge(i) - self.exist[*i] as usize
     }
     pub fn count_le(&self, i: &usize) -> usize {
-        self.count_lt(i) + (self._bit >> i & 1) as usize
+        self.count_lt(i) + self.exist[*i] as usize
     }
     pub fn count_lt(&self, i: &usize) -> usize {
-        (self._bit & ((1 << i) - 1)).count_ones() as usize
+        self.exist.iter().take(*i).filter(|&&x| x).count()
     }
 }
 
@@ -117,7 +119,11 @@ mod test {
     #[test]
     fn test_segment() {
         let mut segment = Segments {
-            _bit: 0b101111000011110000111100001111,
+            exist: vec![
+                true, true, true, true, false, false, false, false, true, true, true, true, false,
+                false, false, false, true, true, true, true, false, false, false, false, true,
+                true, true, true, false, true,
+            ],
         };
         assert_eq!(segment.left(10), 8);
         assert_eq!(segment.right(10), 12);
@@ -128,36 +134,64 @@ mod test {
         assert_eq!(segment.left(29), 29);
         assert_eq!(segment.right(29), 30);
         segment.erase(10);
-        assert_eq!(segment._bit, 0b101111000011110000101100001111);
+        assert_eq!(
+            segment.exist,
+            vec![
+                true, true, true, true, false, false, false, false, true, true, false, true, false,
+                false, false, false, true, true, true, true, false, false, false, false, true,
+                true, true, true, false, true
+            ]
+        );
         segment.insert(10);
-        assert_eq!(segment._bit, 0b101111000011110000111100001111);
+        assert_eq!(
+            segment.exist,
+            vec![
+                true, true, true, true, false, false, false, false, true, true, true, true, false,
+                false, false, false, true, true, true, true, false, false, false, false, true,
+                true, true, true, false, true
+            ]
+        );
 
         assert!(segment.all(0, 4));
         assert!(!segment.all(0, 5));
 
-        let segment = Segments {
-            _bit: 0b00001111000011110000111100001111,
+        let mut segment = Segments {
+            exist: vec![
+                true, true, true, true, false, false, false, false, true, true, true, true, false,
+                false, false, false, true, true, true, true, false, false, false, false, true,
+                true, true, true, false, false, false, false,
+            ],
         };
         assert_eq!(
             segment.segments(),
             vec![(0, 4,), (8, 12,), (16, 20,), (24, 28,),]
         );
-        let segment = Segments {
-            _bit: 0b11110000111100001111000011110000,
+        let mut segment = Segments {
+            exist: vec![
+                false, false, false, false, true, true, true, true, false, false, false, false,
+                true, true, true, true, false, false, false, false, true, true, true, true, false,
+                false, false, false, true, true, true, true,
+            ],
         };
         assert_eq!(
             segment.segments(),
             vec![(4, 8,), (12, 16,), (20, 24,), (28, 32,),]
         );
-        let segment = Segments {
-            _bit: 0b11111111111111111111111111111101,
+        let mut segment = Segments {
+            exist: vec![
+                true, false, true, true, true, true, true, true, true, true, true, true, true,
+                true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+                true, true, true, true, true,
+            ],
         };
         assert!(segment.all(4, 8));
     }
 
     #[test]
     fn test_bitset() {
-        let mut bitset = BitSet::new();
+        let mut bitset = BitSet {
+            exist: vec![false; 32],
+        };
         assert_eq!(bitset.min(), None);
         bitset.insert(10);
         assert_eq!(bitset.min(), Some(10));
