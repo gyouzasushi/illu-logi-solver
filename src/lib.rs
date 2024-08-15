@@ -103,7 +103,7 @@ impl LineError {
 
 struct Line {
     n: usize,
-    hint: Vec<usize>,
+    constraint: Vec<usize>,
     states: Vec<State>,
     segments_black: Segments,
     segments_non_white: Segments,
@@ -116,13 +116,13 @@ struct Line {
 }
 
 impl Line {
-    fn new(n: usize, hint: Vec<usize>) -> Self {
-        let m = hint.len();
+    fn new(n: usize, constraint: Vec<usize>) -> Self {
+        let m = constraint.len();
         let mut possible_size = BitSet::new(vec![false; n]);
-        (0..m).for_each(|id| possible_size.insert(hint[id]));
+        (0..m).for_each(|id| possible_size.insert(constraint[id]));
         Self {
             n,
-            hint,
+            constraint,
             states: vec![State::Unconfirmed; n],
             segments_black: Segments::new(vec![false; n]),
             segments_non_white: Segments::new(vec![true; n]),
@@ -252,7 +252,7 @@ impl Line {
         Ok(())
     }
     fn update_possible_id(&mut self) -> Result<(), LineError> {
-        let (n, m) = (self.n, self.hint.len());
+        let (n, m) = (self.n, self.constraint.len());
         loop {
             let prev = self._possible_id.clone();
             /* 左に寄せる */
@@ -265,8 +265,8 @@ impl Line {
                             && self._possible_id[j - 1].1 <= id + 1
                     })
                     .unwrap_or(0);
-                if j > self.hint[id] {
-                    ls[id].setmax(j - self.hint[id]);
+                if j > self.constraint[id] {
+                    ls[id].setmax(j - self.constraint[id]);
                 }
             }
             let mut j = n;
@@ -279,11 +279,11 @@ impl Line {
             let mut l = 0;
             for id in 0..m {
                 l.setmax(ls[id]);
-                let mut r = l + self.hint[id];
+                let mut r = l + self.constraint[id];
                 if r <= self.n {
                     while let Some(j) = (l..r).rfind(|&j| self.states[j] == State::White) {
                         l = j + 1;
-                        r = l + self.hint[id];
+                        r = l + self.constraint[id];
                         if r > self.n {
                             break;
                         }
@@ -305,8 +305,8 @@ impl Line {
                         matches!(self.states[j], State::Black) && self._possible_id[j].0 >= id
                     })
                     .unwrap_or(self.n);
-                if j + self.hint[id] <= self.n {
-                    rs[id].setmin(j + self.hint[id]);
+                if j + self.constraint[id] <= self.n {
+                    rs[id].setmin(j + self.constraint[id]);
                 }
             }
             let mut j = 0;
@@ -319,11 +319,11 @@ impl Line {
             let mut r = n;
             for id in (0..m).rev() {
                 r.setmin(rs[id]);
-                let mut l = r.wrapping_sub(self.hint[id]);
+                let mut l = r.wrapping_sub(self.constraint[id]);
                 if l < self.n {
                     while let Some(j) = (l..r).find(|&j| self.states[j] == State::White) {
                         r = j;
-                        l = r.wrapping_sub(self.hint[id]);
+                        l = r.wrapping_sub(self.constraint[id]);
                         if l >= self.n {
                             break;
                         }
@@ -356,19 +356,19 @@ impl Line {
         for j in 0..n {
             self.possible_size[j].clear();
             self.possible_id(j)
-                .for_each(|id| self.possible_size[j].insert(self.hint[id]));
+                .for_each(|id| self.possible_size[j].insert(self.constraint[id]));
         }
 
         Ok(())
     }
     fn set_black_if_leftmost_and_rightmost_intersect(&mut self) {
-        let m = self.hint.len();
+        let m = self.constraint.len();
         for id in 0..m {
             let (l, r) = self.id_range[id];
-            if r < l + self.hint[id] {
+            if r < l + self.constraint[id] {
                 continue;
             }
-            let (l, r) = (r - self.hint[id], l + self.hint[id]);
+            let (l, r) = (r - self.constraint[id], l + self.constraint[id]);
             self.set_range(
                 l..r,
                 State::Black,
@@ -504,7 +504,7 @@ impl Line {
             if j + 1 < self.n && matches!(self.states[j + 1], State::Black) {
                 size += self.segments_black.size(j + 1);
             }
-            if size > self.hint[id] {
+            if size > self.constraint[id] {
                 self.set(j, State::White, Operation::WhiteIfTooLong(j));
             }
         }
@@ -565,23 +565,23 @@ pub enum SolverError {
 
 pub struct Solver {
     n: usize,
-    hints: [Vec<Vec<usize>>; 2],
+    constraints: [Vec<Vec<usize>>; 2],
     lines: [Vec<Line>; 2],
     queue: VecDeque<(Axis, usize)>,
     _turn: usize,
 }
 impl Solver {
-    pub fn new(hints: [Vec<Vec<usize>>; 2]) -> Self {
-        assert_eq!(hints[0].len(), hints[1].len());
-        let n = hints[0].len();
+    pub fn new(constraints: [Vec<Vec<usize>>; 2]) -> Self {
+        assert_eq!(constraints[0].len(), constraints[1].len());
+        let n = constraints[0].len();
         let lines = [
-            hints[0]
+            constraints[0]
                 .iter()
-                .map(|hint| Line::new(n, hint.clone()))
+                .map(|constraint| Line::new(n, constraint.clone()))
                 .collect(),
-            hints[1]
+            constraints[1]
                 .iter()
-                .map(|hint| Line::new(n, hint.clone()))
+                .map(|constraint| Line::new(n, constraint.clone()))
                 .collect(),
         ];
         let queue = (0..2)
@@ -589,7 +589,7 @@ impl Solver {
             .collect();
         Self {
             n,
-            hints,
+            constraints,
             lines,
             queue,
             _turn: 0,
@@ -598,13 +598,13 @@ impl Solver {
 
     fn clear(&mut self) {
         self.lines = [
-            self.hints[0]
+            self.constraints[0]
                 .iter()
-                .map(|hint| Line::new(self.n, hint.clone()))
+                .map(|constraint| Line::new(self.n, constraint.clone()))
                 .collect(),
-            self.hints[1]
+            self.constraints[1]
                 .iter()
-                .map(|hint| Line::new(self.n, hint.clone()))
+                .map(|constraint| Line::new(self.n, constraint.clone()))
                 .collect(),
         ];
         self.queue = (0..2)
@@ -692,7 +692,7 @@ impl Solver {
                 .iter()
                 .map(|(l, r)| r - l)
                 .collect::<Vec<_>>();
-            if v != self.lines[Axis::Row as usize][i].hint {
+            if v != self.lines[Axis::Row as usize][i].constraint {
                 return false;
             }
             let v = self.lines[Axis::Column as usize][i]
@@ -701,7 +701,7 @@ impl Solver {
                 .iter()
                 .map(|(l, r)| r - l)
                 .collect::<Vec<_>>();
-            if v != self.lines[Axis::Column as usize][i].hint {
+            if v != self.lines[Axis::Column as usize][i].constraint {
                 return false;
             }
         }
