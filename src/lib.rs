@@ -69,14 +69,14 @@ enum ExecutingOperation {
 impl ExecutingOperation {
     fn advance(&mut self) {
         *self = match self {
-            Self::BlackIfLeftmostAndRightmostIntersect => Self::WhiteIfPossibleIdIsEmpty,
-            Self::WhiteIfPossibleIdIsEmpty => Self::BlackIfBothEndIsConfirmed,
+            Self::BlackIfLeftmostAndRightmostIntersect => Self::BlackIfBothEndIsConfirmed,
             Self::BlackIfBothEndIsConfirmed => Self::BlackIfLeftEndIsConfirmed,
             Self::BlackIfLeftEndIsConfirmed => Self::BlackIfRightEndIsConfirmed,
             Self::BlackIfRightEndIsConfirmed => Self::WhiteIfTheLengthIsConfirmed,
             Self::WhiteIfTheLengthIsConfirmed => Self::WhiteIfTooLong,
             Self::WhiteIfTooLong => Self::WhiteIfTooShort,
-            Self::WhiteIfTooShort => Self::BlackIfLeftmostAndRightmostIntersect,
+            Self::WhiteIfTooShort => Self::WhiteIfPossibleIdIsEmpty,
+            Self::WhiteIfPossibleIdIsEmpty => Self::BlackIfLeftmostAndRightmostIntersect,
         };
     }
 }
@@ -237,7 +237,7 @@ impl Line {
                 break;
             }
         }
-        if let Some((range, state, by)) = self.queue.pop_front() {
+        if let Some((range, state, by)) = self.queue.pop_back() {
             self.update(range.clone(), state, by)?;
             Ok(Some((range, state, by)))
         } else {
@@ -246,7 +246,7 @@ impl Line {
     }
     #[cfg(test)]
     fn flush_queue(&mut self) -> Result<(), LineError> {
-        while let Some((range, state, by)) = self.queue.pop_front() {
+        while let Some((range, state, by)) = self.queue.pop_back() {
             self.update(range.clone(), state, by)?;
         }
         Ok(())
@@ -614,7 +614,7 @@ impl Solver {
     }
 
     pub fn solve(&mut self) -> Result<(), SolverError> {
-        while let Some((axis, i)) = self.queue.pop_front() {
+        while let Some((axis, i)) = self.queue.pop_back() {
             while let Some((range, state, _by)) = self.lines[axis as usize][i]
                 .advance()
                 .map_err(|err| err.to_solver_error(axis, i))?
@@ -674,7 +674,7 @@ impl Solver {
                     by,
                 }));
             } else {
-                self.queue.pop_front().unwrap();
+                self.queue.pop_back().unwrap();
             }
         }
         Ok(None)
