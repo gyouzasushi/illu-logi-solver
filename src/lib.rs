@@ -237,7 +237,7 @@ impl Line {
                 break;
             }
         }
-        if let Some((range, state, by)) = self.queue.pop_back() {
+        if let Some((range, state, by)) = self.queue.pop_front() {
             self.update(range.clone(), state, by)?;
             Ok(Some((range, state, by)))
         } else {
@@ -246,7 +246,7 @@ impl Line {
     }
     #[cfg(test)]
     fn flush_queue(&mut self) -> Result<(), LineError> {
-        while let Some((range, state, by)) = self.queue.pop_back() {
+        while let Some((range, state, by)) = self.queue.pop_front() {
             self.update(range.clone(), state, by)?;
         }
         Ok(())
@@ -614,7 +614,7 @@ impl Solver {
     }
 
     pub fn solve(&mut self) -> Result<(), SolverError> {
-        while let Some((axis, i)) = self.queue.pop_back() {
+        while let Some((axis, i)) = self.queue.pop_front() {
             while let Some((range, state, _by)) = self.lines[axis as usize][i]
                 .advance()
                 .map_err(|err| err.to_solver_error(axis, i))?
@@ -654,7 +654,7 @@ impl Solver {
     }
 
     pub fn advance(&mut self) -> Result<Option<Action>, SolverError> {
-        while let Some(&(axis, i)) = self.queue.back() {
+        while let Some(&(axis, i)) = self.queue.front() {
             if let Some((range, state, by)) = self.lines[axis as usize][i]
                 .advance()
                 .map_err(|err| err.to_solver_error(axis, i))?
@@ -663,7 +663,7 @@ impl Solver {
                     self.lines[axis.orthogonal() as usize][j]
                         .update(i..i + 1, state, Operation::SameStateAsOrthogonal)
                         .map_err(|err| err.to_solver_error(axis, i))?;
-                    self.queue.push_back((axis.orthogonal(), j));
+                    self.queue.push_front((axis.orthogonal(), j));
                 }
                 self._turn += 1;
                 return Ok(Some(Action {
@@ -674,7 +674,7 @@ impl Solver {
                     by,
                 }));
             } else {
-                self.queue.pop_back().unwrap();
+                self.queue.pop_front().unwrap();
             }
         }
         Ok(None)
