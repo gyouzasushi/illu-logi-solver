@@ -654,7 +654,7 @@ impl Solver {
     }
 
     pub fn advance(&mut self) -> Result<Option<Action>, SolverError> {
-        while let Some(&(axis, i)) = self.queue.front() {
+        while let Some(&(axis, i)) = self.queue.back() {
             if let Some((range, state, by)) = self.lines[axis as usize][i]
                 .advance()
                 .map_err(|err| err.to_solver_error(axis, i))?
