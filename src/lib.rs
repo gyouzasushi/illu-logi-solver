@@ -55,31 +55,6 @@ pub enum Operation {
     SameStateAsOrthogonal,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-enum ExecutingOperation {
-    BlackIfLeftmostAndRightmostIntersect,
-    WhiteIfPossibleIdIsEmpty,
-    BlackIfBothEndIsConfirmed,
-    BlackIfLeftEndIsConfirmed,
-    BlackIfRightEndIsConfirmed,
-    WhiteIfTheLengthIsConfirmed,
-    WhiteIfTooLong,
-    WhiteIfTooShort,
-}
-impl ExecutingOperation {
-    fn advance(&mut self) {
-        *self = match self {
-            Self::BlackIfLeftmostAndRightmostIntersect => Self::BlackIfBothEndIsConfirmed,
-            Self::BlackIfBothEndIsConfirmed => Self::BlackIfLeftEndIsConfirmed,
-            Self::BlackIfLeftEndIsConfirmed => Self::BlackIfRightEndIsConfirmed,
-            Self::BlackIfRightEndIsConfirmed => Self::WhiteIfTheLengthIsConfirmed,
-            Self::WhiteIfTheLengthIsConfirmed => Self::WhiteIfTooLong,
-            Self::WhiteIfTooLong => Self::WhiteIfTooShort,
-            Self::WhiteIfTooShort => Self::WhiteIfPossibleIdIsEmpty,
-            Self::WhiteIfPossibleIdIsEmpty => Self::BlackIfLeftmostAndRightmostIntersect,
-        };
-    }
-}
 #[derive(Debug)]
 enum LineError {
     Contradiction(usize, State, State, Operation),
@@ -112,7 +87,7 @@ struct Line {
     _possible_id: Vec<(usize, usize)>,
     possible_size: Vec<BitSet>,
     id_range: Vec<(usize, usize)>,
-    next_operation: ExecutingOperation,
+    next_step: usize,
     queue: VecDeque<(Range<usize>, State, Operation)>,
 }
 
@@ -131,7 +106,7 @@ impl Line {
             _possible_id: vec![(0, m); n],
             possible_size: vec![possible_size; n],
             id_range: vec![(0, n); m],
-            next_operation: ExecutingOperation::BlackIfLeftmostAndRightmostIntersect,
+            next_step: 0,
             queue: VecDeque::new(),
         }
     }
@@ -204,37 +179,27 @@ impl Line {
     fn has_update(&self) -> bool {
         !self.queue.is_empty()
     }
-    fn execute_operation(&mut self) {
-        match self.next_operation {
-            ExecutingOperation::BlackIfLeftmostAndRightmostIntersect => {
-                self.set_black_if_leftmost_and_rightmost_intersect()
-            }
-            ExecutingOperation::WhiteIfPossibleIdIsEmpty => {
-                self.set_white_if_possible_id_is_empty()
-            }
-            ExecutingOperation::BlackIfLeftEndIsConfirmed => {
-                self.set_black_if_left_end_is_confirmed()
-            }
-            ExecutingOperation::BlackIfRightEndIsConfirmed => {
-                self.set_black_if_right_end_is_confirmed()
-            }
-            ExecutingOperation::BlackIfBothEndIsConfirmed => {
-                self.set_black_if_both_end_is_confirmed()
-            }
-            ExecutingOperation::WhiteIfTheLengthIsConfirmed => {
-                self.set_white_if_the_length_is_confirmed()
-            }
-            ExecutingOperation::WhiteIfTooLong => self.set_white_if_too_long(),
-            ExecutingOperation::WhiteIfTooShort => self.set_white_if_too_short(),
-        }
-        self.next_operation.advance();
+    const STEPS: [fn(&mut Line); 8] = [
+        Line::set_black_if_leftmost_and_rightmost_intersect,
+        Line::set_black_if_both_end_is_confirmed,
+        Line::set_black_if_left_end_is_confirmed,
+        Line::set_black_if_right_end_is_confirmed,
+        Line::set_white_if_the_length_is_confirmed,
+        Line::set_white_if_too_long,
+        Line::set_white_if_too_short,
+        Line::set_white_if_possible_id_is_empty,
+    ];
+
+    fn execute_step(&mut self) {
+        Self::STEPS[self.next_step](self);
+        self.next_step = (self.next_step + 1) % Self::STEPS.len();
     }
     fn advance(&mut self) -> Result<Option<(Range<usize>, State, Operation)>, LineError> {
-        self.next_operation = ExecutingOperation::BlackIfLeftmostAndRightmostIntersect;
+        self.next_step = 0;
         self.update_possible_id()?;
         while !self.has_update() {
-            self.execute_operation();
-            if self.next_operation == ExecutingOperation::BlackIfLeftmostAndRightmostIntersect {
+            self.execute_step();
+            if self.next_step == 0 {
                 break;
             }
         }
