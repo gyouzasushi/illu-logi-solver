@@ -563,20 +563,7 @@ impl Solver {
     }
 
     fn clear(&mut self) {
-        self.lines = [
-            self.constraints[0]
-                .iter()
-                .map(|constraint| Line::new(self.n, constraint.clone()))
-                .collect(),
-            self.constraints[1]
-                .iter()
-                .map(|constraint| Line::new(self.n, constraint.clone()))
-                .collect(),
-        ];
-        self.queue = (0..2)
-            .flat_map(|axis| (0..self.n).map(move |i| (axis.into(), i)))
-            .collect();
-        self._turn = 0;
+        *self = Self::new(std::mem::take(&mut self.constraints));
     }
 
     pub fn solve(&mut self) -> Result<(), SolverError> {
