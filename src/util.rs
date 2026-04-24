@@ -78,39 +78,6 @@ impl Segments {
     }
 }
 
-#[derive(Clone)]
-pub struct BitSet {
-    exist: Vec<bool>,
-}
-impl BitSet {
-    pub fn new(exist: Vec<bool>) -> Self {
-        Self { exist }
-    }
-    pub fn insert(&mut self, i: usize) {
-        self.exist[i] = true;
-    }
-    pub fn clear(&mut self) {
-        self.exist = self.exist.iter().map(|_| false).collect()
-    }
-    pub fn min(&self) -> Option<usize> {
-        self.exist.iter().position(|x| *x)
-    }
-    pub fn contains(&self, i: &usize) -> bool {
-        self.exist[*i]
-    }
-    pub fn count_ge(&self, i: &usize) -> usize {
-        self.exist.iter().skip(*i).filter(|&&x| x).count()
-    }
-    pub fn count_gt(&self, i: &usize) -> usize {
-        self.count_ge(i) - self.exist[*i] as usize
-    }
-    pub fn count_le(&self, i: &usize) -> usize {
-        self.count_lt(i) + self.exist[*i] as usize
-    }
-    pub fn count_lt(&self, i: &usize) -> usize {
-        self.exist.iter().take(*i).filter(|&&x| x).count()
-    }
-}
 
 #[cfg(test)]
 mod test {
@@ -187,29 +154,4 @@ mod test {
         assert!(segment.all(4, 8));
     }
 
-    #[test]
-    fn test_bitset() {
-        let mut bitset = BitSet {
-            exist: vec![false; 32],
-        };
-        assert_eq!(bitset.min(), None);
-        bitset.insert(10);
-        assert_eq!(bitset.min(), Some(10));
-        bitset.insert(15);
-        assert_eq!(bitset.min(), Some(10));
-        bitset.insert(5);
-        assert_eq!(bitset.min(), Some(5));
-        bitset.insert(0);
-        assert_eq!(bitset.min(), Some(0));
-
-        assert_eq!(bitset.count_ge(&10), 2);
-        assert_eq!(bitset.count_gt(&10), 1);
-        assert_eq!(bitset.count_ge(&9), 2);
-        assert_eq!(bitset.count_gt(&9), 2);
-
-        assert_eq!(bitset.count_le(&10), 3);
-        assert_eq!(bitset.count_lt(&10), 2);
-        assert_eq!(bitset.count_le(&8), 2);
-        assert_eq!(bitset.count_lt(&8), 2);
-    }
 }

@@ -1,6 +1,7 @@
 mod util;
 
-use crate::util::{BitSet, Segments, SetMinMax};
+use crate::util::{Segments, SetMinMax};
+use fixedbitset::FixedBitSet;
 use std::{collections::VecDeque, fmt::Display, ops::Range};
 use thiserror::Error;
 
@@ -85,7 +86,7 @@ struct Line {
     segments_non_white: Segments,
     segments_unconfirmed: Segments,
     _possible_id: Vec<(usize, usize)>,
-    possible_size: Vec<BitSet>,
+    possible_size: Vec<FixedBitSet>,
     id_range: Vec<(usize, usize)>,
     next_step: usize,
     queue: VecDeque<(Range<usize>, State, Operation)>,
@@ -94,7 +95,7 @@ struct Line {
 impl Line {
     fn new(n: usize, constraint: Vec<usize>) -> Self {
         let m = constraint.len();
-        let mut possible_size = BitSet::new(vec![false; n]);
+        let mut possible_size = FixedBitSet::with_capacity(n);
         (0..m).for_each(|id| possible_size.insert(constraint[id]));
         Self {
             n,
@@ -365,11 +366,11 @@ impl Line {
             let mut r = j;
             let mut min = self.possible_size[l..=r]
                 .iter()
-                .map(|possible_size| possible_size.min().unwrap_or(0))
+                .map(|possible_size| possible_size.ones().next().unwrap_or(0))
                 .min()
                 .unwrap_or(0);
             while r < r_max && {
-                min.setmin(self.possible_size[r].min().unwrap_or(0));
+                min.setmin(self.possible_size[r].ones().next().unwrap_or(0));
                 min
             } > r - l
             {
@@ -390,11 +391,11 @@ impl Line {
             let mut l = j;
             let mut min = self.possible_size[l..r]
                 .iter()
-                .map(|possible_size| possible_size.min().unwrap_or(0))
+                .map(|possible_size| possible_size.ones().next().unwrap_or(0))
                 .min()
                 .unwrap_or(0);
             while l > l_min && {
-                min.setmin(self.possible_size[l].min().unwrap_or(0));
+                min.setmin(self.possible_size[l].ones().next().unwrap_or(0));
                 min
             } > r - l
             {
@@ -415,7 +416,7 @@ impl Line {
             let size = r - l;
             if self.possible_size[l..r]
                 .iter()
-                .all(|possible_size| possible_size.count_lt(&size) == 0)
+                .all(|possible_size| possible_size.count_ones(0..size) == 0)
             {
                 self.set_range(
                     l..r,
@@ -434,8 +435,8 @@ impl Line {
             }
             let size = r - l;
             for j in l..r {
-                if self.possible_size[j].contains(&size)
-                    && self.possible_size[j].count_ge(&size) == 1
+                if self.possible_size[j].contains(size)
+                    && self.possible_size[j].count_ones(size..self.n) == 1
                 {
                     if l > 0 {
                         self.set(
@@ -482,7 +483,7 @@ impl Line {
             if r < self.n && self.states[r] != State::White {
                 continue;
             }
-            if (l..r).any(|j| self.possible_size[j].min().unwrap_or(0) > r - l) {
+            if (l..r).any(|j| self.possible_size[j].ones().next().unwrap_or(0) > r - l) {
                 self.set_range(l..r, State::White, Operation::WhiteIfTooShort(l, r));
             }
         }
