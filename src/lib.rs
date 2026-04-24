@@ -152,7 +152,7 @@ impl Line {
                 }
             };
         }
-        self.update_possible_id()?;
+        self.update_possible_id();
         Ok(())
     }
     fn set_state(&mut self, j: usize, state: State) {
@@ -196,7 +196,7 @@ impl Line {
     }
     fn advance(&mut self) -> Result<Option<(Range<usize>, State, Operation)>, LineError> {
         self.next_step = 0;
-        self.update_possible_id()?;
+        self.update_possible_id();
         while !self.has_update() {
             self.execute_step();
             if self.next_step == 0 {
@@ -217,7 +217,7 @@ impl Line {
         }
         Ok(())
     }
-    fn update_possible_id(&mut self) -> Result<(), LineError> {
+    fn update_possible_id(&mut self) {
         let (n, m) = (self.n, self.constraint.len());
         loop {
             let prev = self._possible_id.clone();
@@ -325,7 +325,6 @@ impl Line {
                 .for_each(|id| self.possible_size[j].insert(self.constraint[id]));
         }
 
-        Ok(())
     }
     fn set_black_if_leftmost_and_rightmost_intersect(&mut self) {
         let m = self.constraint.len();
@@ -778,7 +777,7 @@ mod tests {
         line.set_state(17, State::White);
         line.set_state(18, State::White);
         line.set_state(19, State::Black);
-        line.update_possible_id().unwrap();
+        line.update_possible_id();
         for j in 0..20 {
             match j {
                 2..=6 => assert_eq!(line.confirmed_id(j), Some(0)),
@@ -794,7 +793,7 @@ mod tests {
     fn test_set_black_if_leftmost_and_rightmost_intersect() {
         // .....
         let mut line = Line::new(5, vec![4]);
-        line.update_possible_id().unwrap();
+        line.update_possible_id();
         line.set_black_if_leftmost_and_rightmost_intersect();
         line.flush_queue().unwrap();
         assert_eq!(
@@ -874,7 +873,7 @@ mod tests {
         line.set_state(9, State::Black);
         line.set_state(14, State::White);
         line.set_state(17, State::White);
-        line.update_possible_id().unwrap();
+        line.update_possible_id();
         for _ in 0..2 {
             line.update_possible_id();
             line.set_black_if_leftmost_and_rightmost_intersect();
@@ -927,7 +926,7 @@ mod tests {
         line.set_state(1, State::Black);
         line.set_state(2, State::Black);
         line.set_state(3, State::White);
-        line.update_possible_id().unwrap();
+        line.update_possible_id();
         line.set_white_if_the_length_is_confirmed();
         line.flush_queue().unwrap();
         // すでに両隣が白なので余計な変化はない
@@ -971,7 +970,7 @@ mod tests {
         let mut line = Line::new(10, vec![2, 2]);
         line.set_state(4, State::White);
         line.set_state(5, State::Black);
-        line.update_possible_id().unwrap();
+        line.update_possible_id();
         line.set_black_if_left_end_is_confirmed();
         line.flush_queue().unwrap();
         assert_eq!(
@@ -1094,7 +1093,7 @@ mod tests {
         let mut line = Line::new(10, vec![2, 2]);
         line.set_state(4, State::Black);
         line.set_state(5, State::White);
-        line.update_possible_id().unwrap();
+        line.update_possible_id();
         line.set_black_if_right_end_is_confirmed();
         eprintln!("{:#?}", line.queue);
         line.flush_queue().unwrap();
