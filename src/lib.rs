@@ -567,20 +567,7 @@ impl Solver {
     }
 
     pub fn solve(&mut self) -> Result<(), SolverError> {
-        while let Some((axis, i)) = self.queue.pop_front() {
-            while let Some((range, state, _by)) = self.lines[axis as usize][i]
-                .advance()
-                .map_err(|err| err.to_solver_error(axis, i))?
-            {
-                self._turn += 1;
-                for j in range {
-                    self.lines[axis.orthogonal() as usize][j]
-                        .update(i..i + 1, state, Operation::SameStateAsOrthogonal)
-                        .map_err(|err| err.to_solver_error(axis, i))?;
-                    self.queue.push_back((axis.orthogonal(), j));
-                }
-            }
-        }
+        while self.advance()?.is_some() {}
         if self.lines[0]
             .iter()
             .flat_map(|segment| segment.states.clone())
