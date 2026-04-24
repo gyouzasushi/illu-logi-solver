@@ -101,6 +101,7 @@ impl LineError {
     }
 }
 
+#[derive(Clone)]
 struct Line {
     n: usize,
     constraint: Vec<usize>,
