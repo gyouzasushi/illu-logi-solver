@@ -428,7 +428,7 @@ impl Line {
     }
     fn set_white_if_the_length_is_confirmed(&mut self) {
         for (l, r) in self.segments_black.segments() {
-            if (l == 0 || self.states[l] == State::White)
+            if (l == 0 || self.states[l - 1] == State::White)
                 && (r == self.n || self.states[r] == State::White)
             {
                 continue;
@@ -933,6 +933,21 @@ mod tests {
         line.flush_queue().unwrap();
         assert_eq!(line.states[3], State::White);
         assert_eq!(line.states[6], State::White);
+
+        // xoox..... — 左隣が白で確定済みのセグメントは正しくスキップされる
+        let mut line = Line::new(9, vec![2, 2]);
+        line.set_state(0, State::White);
+        line.set_state(1, State::Black);
+        line.set_state(2, State::Black);
+        line.set_state(3, State::White);
+        line.update_possible_id().unwrap();
+        line.set_white_if_the_length_is_confirmed();
+        line.flush_queue().unwrap();
+        // すでに両隣が白なので余計な変化はない
+        assert_eq!(line.states[0], State::White);
+        assert_eq!(line.states[1], State::Black);
+        assert_eq!(line.states[2], State::Black);
+        assert_eq!(line.states[3], State::White);
     }
 
     #[test]
