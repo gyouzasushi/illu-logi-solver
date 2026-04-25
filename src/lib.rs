@@ -77,6 +77,19 @@ impl LineError {
     }
 }
 
+#[derive(Clone, PartialEq)]
+struct Cell {
+    state: State,
+    possible_block_ids: Range<usize>,
+    possible_block_sizes: FixedBitSet,
+}
+
+#[derive(Clone)]
+struct Block {
+    size: usize,
+    possible_placement: Range<usize>,
+}
+
 #[derive(Clone)]
 struct Line {
     n: usize,
