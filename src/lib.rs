@@ -26,15 +26,6 @@ impl From<Axis> for usize {
         }
     }
 }
-impl From<usize> for Axis {
-    fn from(value: usize) -> Self {
-        match value {
-            0 => Axis::Row,
-            1 => Axis::Column,
-            _ => unreachable!(),
-        }
-    }
-}
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum State {
@@ -580,8 +571,9 @@ impl Solver {
                 .map(|constraint| Line::new(n, constraint.clone()))
                 .collect(),
         ];
-        let queue = (0..2)
-            .flat_map(|axis| (0..n).map(move |i| (axis.into(), i)))
+        let queue = [Axis::Row, Axis::Column]
+            .iter()
+            .flat_map(|&axis| (0..n).map(move |i| (axis, i)))
             .collect();
         Self {
             n,
