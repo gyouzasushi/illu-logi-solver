@@ -142,6 +142,20 @@ impl Line {
         }
         self.queue.push_back((range, state, by));
     }
+    fn set_state(&mut self, j: usize, state: State) {
+        self.cells[j].state = state;
+        match state {
+            State::Unconfirmed => {}
+            State::White => {
+                self.segments_non_white.erase(j);
+                self.segments_unconfirmed.erase(j);
+            }
+            State::Black => {
+                self.segments_black.insert(j);
+                self.segments_unconfirmed.erase(j);
+            }
+        }
+    }
     fn update(
         &mut self,
         range: Range<usize>,
@@ -156,35 +170,10 @@ impl Line {
                 }
                 _ => (),
             };
-            self.cells[j].state = state;
-            match state {
-                State::Unconfirmed => {}
-                State::White => {
-                    self.segments_non_white.erase(j);
-                    self.segments_unconfirmed.erase(j);
-                }
-                State::Black => {
-                    self.segments_black.insert(j);
-                    self.segments_unconfirmed.erase(j);
-                }
-            };
+            self.set_state(j, state);
         }
         self.update_possible_id()?;
         Ok(())
-    }
-    fn set_state(&mut self, j: usize, state: State) {
-        self.cells[j].state = state;
-        match state {
-            State::Unconfirmed => {}
-            State::White => {
-                self.segments_non_white.erase(j);
-                self.segments_unconfirmed.erase(j);
-            }
-            State::Black => {
-                self.segments_black.insert(j);
-                self.segments_unconfirmed.erase(j);
-            }
-        };
     }
     fn confirmed_id(&self, j: usize) -> Option<usize> {
         if self.possible_id(j).len() == 1 {
