@@ -218,9 +218,7 @@ impl Line {
         let n = self.n;
         let num_blocks = self.blocks.len();
         loop {
-            let prev: Vec<Range<usize>> = self.cells.iter()
-                .map(|c| c.possible_block_ids.clone())
-                .collect();
+            let mut changed = false;
 
             /* 左に寄せる */
             let mut min_starts = vec![0; num_blocks];
@@ -256,7 +254,7 @@ impl Line {
                 }
                 self.blocks[id].possible_placement.start = l;
                 for j in 0..l.min(n) {
-                    self.cells[j].possible_block_ids.end.setmin(id);
+                    changed |= self.cells[j].possible_block_ids.end.setmin(id);
                 }
                 l = r + 1;
             }
@@ -295,7 +293,7 @@ impl Line {
                 }
                 self.blocks[id].possible_placement.end = r;
                 for j in r..n {
-                    self.cells[j].possible_block_ids.start.setmax(id + 1);
+                    changed |= self.cells[j].possible_block_ids.start.setmax(id + 1);
                 }
                 r = l.wrapping_sub(1);
             }
@@ -308,15 +306,12 @@ impl Line {
                     hi.setmin(self.cells[j].possible_block_ids.end);
                 }
                 for j in l..r {
-                    self.cells[j].possible_block_ids.start.setmax(lo);
-                    self.cells[j].possible_block_ids.end.setmin(hi);
+                    changed |= self.cells[j].possible_block_ids.start.setmax(lo);
+                    changed |= self.cells[j].possible_block_ids.end.setmin(hi);
                 }
             }
 
-            let current: Vec<Range<usize>> = self.cells.iter()
-                .map(|c| c.possible_block_ids.clone())
-                .collect();
-            if current == prev {
+            if !changed {
                 break;
             }
         }
