@@ -42,9 +42,6 @@ impl Segments {
         }
         r
     }
-    pub fn left_right(&self, i: usize) -> (usize, usize) {
-        (self.left(i), self.right(i))
-    }
     pub fn size(&self, i: usize) -> usize {
         self.right(i) - self.left(i)
     }
@@ -53,12 +50,6 @@ impl Segments {
     }
     pub fn erase(&mut self, i: usize) {
         self.exist[i] = false;
-    }
-    pub fn all(&self, l: usize, r: usize) -> bool {
-        self.exist.iter().take(r).skip(l).all(|&x| x)
-    }
-    pub fn is_empty(&self) -> bool {
-        self.exist.iter().all(|&x| !x)
     }
     pub fn segments(&self) -> Vec<(usize, usize)> {
         let mut ret = Vec::new();
@@ -119,10 +110,10 @@ mod test {
             ]
         );
 
-        assert!(segment.all(0, 4));
-        assert!(!segment.all(0, 5));
+        assert!(segment.exist[0..4].iter().all(|&x| x));
+        assert!(!segment.exist[0..5].iter().all(|&x| x));
 
-        let mut segment = Segments {
+        let segment = Segments {
             exist: vec![
                 true, true, true, true, false, false, false, false, true, true, true, true, false,
                 false, false, false, true, true, true, true, false, false, false, false, true,
@@ -133,7 +124,7 @@ mod test {
             segment.segments(),
             vec![(0, 4,), (8, 12,), (16, 20,), (24, 28,),]
         );
-        let mut segment = Segments {
+        let segment = Segments {
             exist: vec![
                 false, false, false, false, true, true, true, true, false, false, false, false,
                 true, true, true, true, false, false, false, false, true, true, true, true, false,
@@ -144,14 +135,14 @@ mod test {
             segment.segments(),
             vec![(4, 8,), (12, 16,), (20, 24,), (28, 32,),]
         );
-        let mut segment = Segments {
+        let segment = Segments {
             exist: vec![
                 true, false, true, true, true, true, true, true, true, true, true, true, true,
                 true, true, true, true, true, true, true, true, true, true, true, true, true, true,
                 true, true, true, true, true,
             ],
         };
-        assert!(segment.all(4, 8));
+        assert!(segment.exist[4..8].iter().all(|&x| x));
     }
 
 }

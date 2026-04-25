@@ -85,7 +85,7 @@ struct Line {
     segments_black: Segments,
     segments_non_white: Segments,
     segments_unconfirmed: Segments,
-    _possible_id: Vec<(usize, usize)>,
+    possible_id_bounds: Vec<(usize, usize)>,
     possible_size: Vec<FixedBitSet>,
     id_range: Vec<(usize, usize)>,
     next_step: usize,
@@ -104,7 +104,7 @@ impl Line {
             segments_black: Segments::new(vec![false; n]),
             segments_non_white: Segments::new(vec![true; n]),
             segments_unconfirmed: Segments::new(vec![true; n]),
-            _possible_id: vec![(0, m); n],
+            possible_id_bounds: vec![(0, m); n],
             possible_size: vec![possible_size; n],
             id_range: vec![(0, n); m],
             next_step: 0,
@@ -112,7 +112,7 @@ impl Line {
         }
     }
     fn possible_id(&self, j: usize) -> Range<usize> {
-        self._possible_id[j].0..self._possible_id[j].1
+        self.possible_id_bounds[j].0..self.possible_id_bounds[j].1
     }
     fn set(&mut self, j: usize, state: State, by: Operation) {
         self.set_range(j..j + 1, state, by)
@@ -153,7 +153,7 @@ impl Line {
                 }
             };
         }
-        self.update_possible_id();
+        self.update_possible_id()?;
         Ok(())
     }
     fn set_state(&mut self, j: usize, state: State) {
@@ -221,7 +221,7 @@ impl Line {
     fn update_possible_id(&mut self) -> Result<(), LineError> {
         let (n, m) = (self.n, self.constraint.len());
         loop {
-            let prev = self._possible_id.clone();
+            let prev = self.possible_id_bounds.clone();
             /* 左に寄せる */
             let mut ls = vec![0; m];
             let mut j = n;
@@ -229,7 +229,7 @@ impl Line {
                 j = (1..=j)
                     .rfind(|&j| {
                         matches!(self.states[j - 1], State::Black)
-                            && self._possible_id[j - 1].1 <= id + 1
+                            && self.possible_id_bounds[j - 1].1 <= id + 1
                     })
                     .unwrap_or(0);
                 if j > self.constraint[id] {
@@ -239,7 +239,7 @@ impl Line {
             let mut j = n;
             for id in (0..m).rev() {
                 j = (1..=j)
-                    .rfind(|&j| self._possible_id[j - 1].1 <= id)
+                    .rfind(|&j| self.possible_id_bounds[j - 1].1 <= id)
                     .unwrap_or(0);
                 ls[id].setmax(j);
             }
@@ -258,7 +258,7 @@ impl Line {
                 }
                 self.id_range[id].0 = l;
                 for j in 0..l.min(n) {
-                    self._possible_id[j].1.setmin(id);
+                    self.possible_id_bounds[j].1.setmin(id);
                 }
                 l = r + 1;
             }
@@ -269,7 +269,7 @@ impl Line {
             for id in 0..m {
                 j = (j..self.n)
                     .find(|&j| {
-                        matches!(self.states[j], State::Black) && self._possible_id[j].0 >= id
+                        matches!(self.states[j], State::Black) && self.possible_id_bounds[j].0 >= id
                     })
                     .unwrap_or(self.n);
                 if j + self.constraint[id] <= self.n {
@@ -279,7 +279,7 @@ impl Line {
             let mut j = 0;
             for id in 0..m {
                 j = (j..self.n)
-                    .find(|&j| self._possible_id[j].0 > id)
+                    .find(|&j| self.possible_id_bounds[j].0 > id)
                     .unwrap_or(self.n);
                 rs[id].setmin(j);
             }
@@ -298,7 +298,7 @@ impl Line {
                 }
                 self.id_range[id].1 = r;
                 for j in r..n {
-                    self._possible_id[j].0.setmax(id + 1);
+                    self.possible_id_bounds[j].0.setmax(id + 1);
                 }
                 r = l.wrapping_sub(1);
             }
@@ -310,12 +310,12 @@ impl Line {
                     possible_id.1.setmin(self.possible_id(j).end);
                 }
                 for j in l..r {
-                    self._possible_id[j].0.setmax(possible_id.0);
-                    self._possible_id[j].1.setmin(possible_id.1);
+                    self.possible_id_bounds[j].0.setmax(possible_id.0);
+                    self.possible_id_bounds[j].1.setmin(possible_id.1);
                 }
             }
 
-            if prev == self._possible_id {
+            if prev == self.possible_id_bounds {
                 break;
             }
         }
@@ -548,7 +548,7 @@ pub struct Solver {
     constraints: [Vec<Vec<usize>>; 2],
     lines: [Vec<Line>; 2],
     queue: VecDeque<(Axis, usize)>,
-    _turn: usize,
+    turn_count: usize,
 }
 impl Solver {
     pub fn new(constraints: [Vec<Vec<usize>>; 2]) -> Self {
@@ -572,7 +572,7 @@ impl Solver {
             constraints,
             lines,
             queue,
-            _turn: 0,
+            turn_count: 0,
         }
     }
 
@@ -594,11 +594,11 @@ impl Solver {
     }
 
     pub fn rollback(&mut self, t: usize) -> Result<Option<Action>, SolverError> {
-        if self._turn > t {
+        if self.turn_count > t {
             self.clear();
         }
         let mut ret = None;
-        while self._turn < t {
+        while self.turn_count < t {
             ret = self.advance()?;
             if ret.is_none() {
                 break;
@@ -619,7 +619,7 @@ impl Solver {
                         .map_err(|err| err.to_solver_error(axis, i))?;
                     self.queue.push_front((axis.orthogonal(), j));
                 }
-                self._turn += 1;
+                self.turn_count += 1;
                 return Ok(Some(Action {
                     axis,
                     i,
@@ -635,7 +635,7 @@ impl Solver {
     }
 
     pub fn turn(&self) -> usize {
-        self._turn
+        self.turn_count
     }
 
     pub fn judge(&self) -> bool {
@@ -792,7 +792,7 @@ mod tests {
         line.set_state(17, State::White);
         line.set_state(18, State::White);
         line.set_state(19, State::Black);
-        line.update_possible_id();
+        line.update_possible_id().unwrap();
         for j in 0..20 {
             match j {
                 2..=6 => assert_eq!(line.confirmed_id(j), Some(0)),
@@ -808,7 +808,7 @@ mod tests {
     fn test_set_black_if_leftmost_and_rightmost_intersect() {
         // .....
         let mut line = Line::new(5, vec![4]);
-        line.update_possible_id();
+        line.update_possible_id().unwrap();
         line.set_black_if_leftmost_and_rightmost_intersect();
         line.flush_queue().unwrap();
         assert_eq!(
@@ -827,7 +827,7 @@ mod tests {
 
         // .....
         let mut line = Line::new(5, vec![3, 1]);
-        line.update_possible_id();
+        line.update_possible_id().unwrap();
         line.set_black_if_leftmost_and_rightmost_intersect();
         line.flush_queue().unwrap();
         assert_eq!(
@@ -850,13 +850,13 @@ mod tests {
         line.set_state(1, State::White);
         line.set_state(2, State::Black);
         line.set_state(3, State::Black);
-        line.update_possible_id();
+        line.update_possible_id().unwrap();
         line.set_black_if_leftmost_and_rightmost_intersect();
         line.flush_queue().unwrap();
 
         // ..........
         let mut line = Line::new(10, vec![3, 2, 2]);
-        line.update_possible_id();
+        line.update_possible_id().unwrap();
         line.set_black_if_leftmost_and_rightmost_intersect();
         line.flush_queue().unwrap();
         assert_eq!(
@@ -888,9 +888,9 @@ mod tests {
         line.set_state(9, State::Black);
         line.set_state(14, State::White);
         line.set_state(17, State::White);
-        line.update_possible_id();
+        line.update_possible_id().unwrap();
         for _ in 0..2 {
-            line.update_possible_id();
+            line.update_possible_id().unwrap();
             line.set_black_if_leftmost_and_rightmost_intersect();
             line.flush_queue().unwrap();
             assert_eq!(
@@ -941,7 +941,7 @@ mod tests {
         line.set_state(1, State::Black);
         line.set_state(2, State::Black);
         line.set_state(3, State::White);
-        line.update_possible_id();
+        line.update_possible_id().unwrap();
         line.set_white_if_the_length_is_confirmed();
         line.flush_queue().unwrap();
         // すでに両隣が白なので余計な変化はない
@@ -957,7 +957,7 @@ mod tests {
         let mut line = Line::new(10, vec![2, 2]);
         line.set_state(1, State::Black);
         line.set_state(8, State::Black);
-        line.update_possible_id();
+        line.update_possible_id().unwrap();
         line.set_black_if_leftmost_and_rightmost_intersect();
         line.set_white_if_possible_id_is_empty();
         line.flush_queue().unwrap();
@@ -985,7 +985,7 @@ mod tests {
         let mut line = Line::new(10, vec![2, 2]);
         line.set_state(4, State::White);
         line.set_state(5, State::Black);
-        line.update_possible_id();
+        line.update_possible_id().unwrap();
         line.set_black_if_left_end_is_confirmed();
         line.flush_queue().unwrap();
         assert_eq!(
@@ -1012,7 +1012,7 @@ mod tests {
         line.set_state(2, State::White);
         line.set_state(9, State::White);
         line.set_state(12, State::Black);
-        line.update_possible_id();
+        line.update_possible_id().unwrap();
         line.set_black_if_leftmost_and_rightmost_intersect();
         line.set_black_if_left_end_is_confirmed();
         line.flush_queue().unwrap();
@@ -1066,7 +1066,7 @@ mod tests {
         line.set_state(9, State::Black);
         line.set_state(14, State::White);
         line.set_state(17, State::White);
-        line.update_possible_id();
+        line.update_possible_id().unwrap();
         line.set_black_if_leftmost_and_rightmost_intersect();
         line.set_black_if_leftmost_and_rightmost_intersect();
         line.set_black_if_left_end_is_confirmed();
@@ -1108,9 +1108,8 @@ mod tests {
         let mut line = Line::new(10, vec![2, 2]);
         line.set_state(4, State::Black);
         line.set_state(5, State::White);
-        line.update_possible_id();
+        line.update_possible_id().unwrap();
         line.set_black_if_right_end_is_confirmed();
-        eprintln!("{:#?}", line.queue);
         line.flush_queue().unwrap();
         assert_eq!(
             line.states,
@@ -1162,7 +1161,7 @@ mod tests {
         line.set_state(3, State::White);
         line.set_state(5, State::Black);
         line.set_state(7, State::White);
-        line.update_possible_id();
+        line.update_possible_id().unwrap();
         line.set_black_if_both_end_is_confirmed();
         line.flush_queue().unwrap();
         assert_eq!(
@@ -1190,7 +1189,7 @@ mod tests {
         // ..o.......
         let mut line = Line::new(10, vec![1, 2]);
         line.set_state(2, State::Black);
-        line.update_possible_id();
+        line.update_possible_id().unwrap();
         line.set_black_if_leftmost_and_rightmost_intersect();
         line.set_white_if_too_long();
         line.flush_queue().unwrap();
@@ -1218,7 +1217,7 @@ mod tests {
         line.set_state(5, State::Black);
         line.set_state(6, State::White);
         line.set_state(8, State::White);
-        line.update_possible_id();
+        line.update_possible_id().unwrap();
         line.set_black_if_leftmost_and_rightmost_intersect();
         line.set_white_if_too_short();
         line.flush_queue().unwrap();

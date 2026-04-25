@@ -23,7 +23,7 @@ fn test_no_solution() {
 
 #[test]
 fn test_5x5() {
-    let mut solver = Solver::new([
+    let _solver = Solver::new([
         vec![vec![2, 1], vec![3], vec![2, 2], vec![1, 2], vec![1, 1]],
         vec![vec![3, 1], vec![4], vec![1, 1], vec![2], vec![1, 2]],
     ]);
@@ -151,7 +151,6 @@ fn test_20x20() {
     ]);
     assert!(solver.solve().is_ok());
     assert!(solver.judge());
-    eprintln!("{}", solver.turn());
 }
 
 #[test]
@@ -224,7 +223,6 @@ fn test_30x30() {
     ]);
     assert!(solver.solve().is_ok());
     assert!(solver.judge());
-    eprintln!("{}", solver.turn());
 }
 
 #[test]
@@ -233,22 +231,7 @@ fn test_advance() {
         vec![vec![2, 1], vec![3], vec![2, 2], vec![1, 2], vec![1, 1]],
         vec![vec![3, 1], vec![4], vec![1, 1], vec![2], vec![1, 2]],
     ]);
-    while let Some(Action {
-        axis,
-        i,
-        range,
-        state,
-        by,
-    }) = solver.advance().unwrap()
-    {
-        let range = if range.len() > 1 {
-            format!("{:?}", (range.start..=range.end - 1))
-        } else {
-            format!("{}", range.start)
-        };
-        eprintln!("set {state:?} on {axis:?}[{i}][{range}] by {by:?}");
-        eprintln!("{solver}");
-    }
+    while solver.advance().unwrap().is_some() {}
 
     let mut solver = Solver::new([
         vec![
@@ -276,22 +259,7 @@ fn test_advance() {
             vec![2, 3],
         ],
     ]);
-    while let Some(Action {
-        axis,
-        i,
-        range,
-        state,
-        by,
-    }) = solver.advance().unwrap()
-    {
-        let range = if range.len() > 1 {
-            format!("{:?}", (range.start..=range.end - 1))
-        } else {
-            format!("{}", range.start)
-        };
-        eprintln!("set {state:?} on {axis:?}[{i}][{range}] by {by:?}");
-        eprintln!("{solver}");
-    }
+    while solver.advance().unwrap().is_some() {}
 }
 
 #[test]
@@ -322,6 +290,5 @@ fn test_rollback() {
             vec![2, 3],
         ],
     ]);
-    solver.rollback(3);
-    eprintln!("{}", solver);
+    let _ = solver.rollback(3);
 }
