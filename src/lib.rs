@@ -93,39 +93,42 @@ struct Block {
 #[derive(Clone)]
 struct Line {
     n: usize,
-    constraint: Vec<usize>,
-    states: Vec<State>,
+    cells: Vec<Cell>,
+    blocks: Vec<Block>,
     segments_black: Segments,
     segments_non_white: Segments,
     segments_unconfirmed: Segments,
-    possible_id_bounds: Vec<(usize, usize)>,
-    possible_size: Vec<FixedBitSet>,
-    id_range: Vec<(usize, usize)>,
     next_step: usize,
     queue: VecDeque<(Range<usize>, State, Operation)>,
 }
 
 impl Line {
     fn new(n: usize, constraint: Vec<usize>) -> Self {
-        let m = constraint.len();
-        let mut possible_size = FixedBitSet::with_capacity(n + 1);
-        (0..m).for_each(|id| possible_size.insert(constraint[id]));
+        let num_blocks = constraint.len();
+        let mut possible_block_sizes = FixedBitSet::with_capacity(n + 1);
+        (0..num_blocks).for_each(|id| possible_block_sizes.insert(constraint[id]));
+        let default_cell = Cell {
+            state: State::Unconfirmed,
+            possible_block_ids: 0..num_blocks,
+            possible_block_sizes,
+        };
+        let blocks = constraint
+            .into_iter()
+            .map(|size| Block { size, possible_placement: 0..n })
+            .collect();
         Self {
             n,
-            constraint,
-            states: vec![State::Unconfirmed; n],
+            cells: vec![default_cell; n],
+            blocks,
             segments_black: Segments::new(vec![false; n]),
             segments_non_white: Segments::new(vec![true; n]),
             segments_unconfirmed: Segments::new(vec![true; n]),
-            possible_id_bounds: vec![(0, m); n],
-            possible_size: vec![possible_size; n],
-            id_range: vec![(0, n); m],
             next_step: 0,
             queue: VecDeque::new(),
         }
     }
     fn possible_id(&self, j: usize) -> Range<usize> {
-        self.possible_id_bounds[j].0..self.possible_id_bounds[j].1
+        self.cells[j].possible_block_ids.clone()
     }
     fn set(&mut self, j: usize, state: State, by: Operation) {
         self.set_range(j..j + 1, state, by)
@@ -134,7 +137,7 @@ impl Line {
         if range.is_empty() {
             return;
         }
-        if range.clone().all(|j| self.states[j] == state) {
+        if range.clone().all(|j| self.cells[j].state == state) {
             return;
         }
         self.queue.push_back((range, state, by));
@@ -146,14 +149,14 @@ impl Line {
         by: Operation,
     ) -> Result<(), LineError> {
         for j in range {
-            match (self.states[j], state) {
+            match (self.cells[j].state, state) {
                 (State::White, State::Unconfirmed | State::Black)
                 | (State::Black, State::Unconfirmed | State::White) => {
-                    return Err(LineError::Contradiction(j, self.states[j], state, by));
+                    return Err(LineError::Contradiction(j, self.cells[j].state, state, by));
                 }
                 _ => (),
             };
-            self.states[j] = state;
+            self.cells[j].state = state;
             match state {
                 State::Unconfirmed => {}
                 State::White => {
@@ -170,7 +173,7 @@ impl Line {
         Ok(())
     }
     fn set_state(&mut self, j: usize, state: State) {
-        self.states[j] = state;
+        self.cells[j].state = state;
         match state {
             State::Unconfirmed => {}
             State::White => {
@@ -232,136 +235,147 @@ impl Line {
         Ok(())
     }
     fn update_possible_id(&mut self) -> Result<(), LineError> {
-        let (n, m) = (self.n, self.constraint.len());
+        let n = self.n;
+        let num_blocks = self.blocks.len();
         loop {
-            let prev = self.possible_id_bounds.clone();
+            let prev: Vec<Range<usize>> = self.cells.iter()
+                .map(|c| c.possible_block_ids.clone())
+                .collect();
+
             /* 左に寄せる */
-            let mut ls = vec![0; m];
+            let mut min_starts = vec![0; num_blocks];
             let mut j = n;
-            for id in (0..m).rev() {
+            for id in (0..num_blocks).rev() {
                 j = (1..=j)
                     .rfind(|&j| {
-                        matches!(self.states[j - 1], State::Black)
-                            && self.possible_id_bounds[j - 1].1 <= id + 1
+                        matches!(self.cells[j - 1].state, State::Black)
+                            && self.cells[j - 1].possible_block_ids.end <= id + 1
                     })
                     .unwrap_or(0);
-                if j > self.constraint[id] {
-                    ls[id].setmax(j - self.constraint[id]);
+                if j > self.blocks[id].size {
+                    min_starts[id].setmax(j - self.blocks[id].size);
                 }
             }
             let mut j = n;
-            for id in (0..m).rev() {
+            for id in (0..num_blocks).rev() {
                 j = (1..=j)
-                    .rfind(|&j| self.possible_id_bounds[j - 1].1 <= id)
+                    .rfind(|&j| self.cells[j - 1].possible_block_ids.end <= id)
                     .unwrap_or(0);
-                ls[id].setmax(j);
+                min_starts[id].setmax(j);
             }
             let mut l = 0;
-            for id in 0..m {
-                l.setmax(ls[id]);
-                let mut r = l + self.constraint[id];
-                if r <= self.n {
-                    while let Some(j) = (l..r).rfind(|&j| self.states[j] == State::White) {
+            for id in 0..num_blocks {
+                l.setmax(min_starts[id]);
+                let mut r = l + self.blocks[id].size;
+                if r <= n {
+                    while let Some(j) = (l..r).rfind(|&j| self.cells[j].state == State::White) {
                         l = j + 1;
-                        r = l + self.constraint[id];
-                        if r > self.n {
-                            break;
-                        }
+                        r = l + self.blocks[id].size;
+                        if r > n { break; }
                     }
                 }
-                self.id_range[id].0 = l;
+                self.blocks[id].possible_placement.start = l;
                 for j in 0..l.min(n) {
-                    self.possible_id_bounds[j].1.setmin(id);
+                    self.cells[j].possible_block_ids.end.setmin(id);
                 }
                 l = r + 1;
             }
 
             /* 右に寄せる */
-            let mut rs = vec![n; m];
+            let mut max_ends = vec![n; num_blocks];
             let mut j = 0;
-            for id in 0..m {
-                j = (j..self.n)
+            for id in 0..num_blocks {
+                j = (j..n)
                     .find(|&j| {
-                        matches!(self.states[j], State::Black) && self.possible_id_bounds[j].0 >= id
+                        matches!(self.cells[j].state, State::Black)
+                            && self.cells[j].possible_block_ids.start >= id
                     })
-                    .unwrap_or(self.n);
-                if j + self.constraint[id] <= self.n {
-                    rs[id].setmin(j + self.constraint[id]);
+                    .unwrap_or(n);
+                if j + self.blocks[id].size <= n {
+                    max_ends[id].setmin(j + self.blocks[id].size);
                 }
             }
             let mut j = 0;
-            for id in 0..m {
-                j = (j..self.n)
-                    .find(|&j| self.possible_id_bounds[j].0 > id)
-                    .unwrap_or(self.n);
-                rs[id].setmin(j);
+            for id in 0..num_blocks {
+                j = (j..n)
+                    .find(|&j| self.cells[j].possible_block_ids.start > id)
+                    .unwrap_or(n);
+                max_ends[id].setmin(j);
             }
             let mut r = n;
-            for id in (0..m).rev() {
-                r.setmin(rs[id]);
-                let mut l = r.wrapping_sub(self.constraint[id]);
-                if l < self.n {
-                    while let Some(j) = (l..r).find(|&j| self.states[j] == State::White) {
+            for id in (0..num_blocks).rev() {
+                r.setmin(max_ends[id]);
+                let mut l = r.wrapping_sub(self.blocks[id].size);
+                if l < n {
+                    while let Some(j) = (l..r).find(|&j| self.cells[j].state == State::White) {
                         r = j;
-                        l = r.wrapping_sub(self.constraint[id]);
-                        if l >= self.n {
-                            break;
-                        }
+                        l = r.wrapping_sub(self.blocks[id].size);
+                        if l >= n { break; }
                     }
                 }
-                self.id_range[id].1 = r;
+                self.blocks[id].possible_placement.end = r;
                 for j in r..n {
-                    self.possible_id_bounds[j].0.setmax(id + 1);
+                    self.cells[j].possible_block_ids.start.setmax(id + 1);
                 }
                 r = l.wrapping_sub(1);
             }
 
             for (l, r) in self.segments_black.segments() {
-                let mut possible_id = (0, m);
+                let mut lo = 0;
+                let mut hi = num_blocks;
                 for j in l..r {
-                    possible_id.0.setmax(self.possible_id(j).start);
-                    possible_id.1.setmin(self.possible_id(j).end);
+                    lo.setmax(self.cells[j].possible_block_ids.start);
+                    hi.setmin(self.cells[j].possible_block_ids.end);
                 }
                 for j in l..r {
-                    self.possible_id_bounds[j].0.setmax(possible_id.0);
-                    self.possible_id_bounds[j].1.setmin(possible_id.1);
+                    self.cells[j].possible_block_ids.start.setmax(lo);
+                    self.cells[j].possible_block_ids.end.setmin(hi);
                 }
             }
 
-            if prev == self.possible_id_bounds {
+            let current: Vec<Range<usize>> = self.cells.iter()
+                .map(|c| c.possible_block_ids.clone())
+                .collect();
+            if current == prev {
                 break;
             }
         }
 
-        for id in 0..m {
-            let (l, r) = self.id_range[id];
-            if l + self.constraint[id] > r {
-                let j = l.min(n.saturating_sub(1));
+        for id in 0..num_blocks {
+            let start = self.blocks[id].possible_placement.start;
+            let end = self.blocks[id].possible_placement.end;
+            if start + self.blocks[id].size > end {
+                let j = start.min(n.saturating_sub(1));
                 return Err(LineError::Contradiction(
                     j,
-                    self.states[j],
+                    self.cells[j].state,
                     State::Black,
-                    Operation::BlackIfLeftmostAndRightmostIntersect(l, l + self.constraint[id]),
+                    Operation::BlackIfLeftmostAndRightmostIntersect(
+                        start, start + self.blocks[id].size,
+                    ),
                 ));
             }
         }
 
         for j in 0..n {
-            self.possible_size[j].clear();
-            self.possible_id(j)
-                .for_each(|id| self.possible_size[j].insert(self.constraint[id]));
+            self.cells[j].possible_block_sizes.clear();
+            let ids = self.cells[j].possible_block_ids.clone();
+            for id in ids {
+                self.cells[j].possible_block_sizes.insert(self.blocks[id].size);
+            }
         }
 
         Ok(())
     }
     fn set_black_if_leftmost_and_rightmost_intersect(&mut self) {
-        let m = self.constraint.len();
-        for id in 0..m {
-            let (l, r) = self.id_range[id];
-            if r < l + self.constraint[id] {
+        let num_blocks = self.blocks.len();
+        for id in 0..num_blocks {
+            let l = self.blocks[id].possible_placement.start;
+            let r = self.blocks[id].possible_placement.end;
+            if r < l + self.blocks[id].size {
                 continue;
             }
-            let (l, r) = (r - self.constraint[id], l + self.constraint[id]);
+            let (l, r) = (r - self.blocks[id].size, l + self.blocks[id].size);
             self.set_range(
                 l..r,
                 State::Black,
@@ -391,13 +405,13 @@ impl Line {
             let l = self.segments_non_white.left(j);
             let r_max = self.segments_non_white.right(j);
             let mut r = j;
-            let mut min = self.possible_size[l..=r]
+            let mut min = self.cells[l..=r]
                 .iter()
-                .map(|possible_size| possible_size.ones().next().unwrap_or(0))
+                .map(|cell| cell.possible_block_sizes.ones().next().unwrap_or(0))
                 .min()
                 .unwrap_or(0);
             while r < r_max && {
-                min.setmin(self.possible_size[r].ones().next().unwrap_or(0));
+                min.setmin(self.cells[r].possible_block_sizes.ones().next().unwrap_or(0));
                 min
             } > r - l
             {
@@ -416,13 +430,13 @@ impl Line {
             let r = self.segments_non_white.right(j);
             let l_min = self.segments_non_white.left(j);
             let mut l = j;
-            let mut min = self.possible_size[l..r]
+            let mut min = self.cells[l..r]
                 .iter()
-                .map(|possible_size| possible_size.ones().next().unwrap_or(0))
+                .map(|cell| cell.possible_block_sizes.ones().next().unwrap_or(0))
                 .min()
                 .unwrap_or(0);
             while l > l_min && {
-                min.setmin(self.possible_size[l].ones().next().unwrap_or(0));
+                min.setmin(self.cells[l].possible_block_sizes.ones().next().unwrap_or(0));
                 min
             } > r - l
             {
@@ -437,13 +451,13 @@ impl Line {
     }
     fn set_black_if_both_end_is_confirmed(&mut self) {
         for (l, r) in self.segments_non_white.segments() {
-            if (l..r).all(|j| self.states[j] == State::Unconfirmed) {
+            if (l..r).all(|j| self.cells[j].state == State::Unconfirmed) {
                 continue;
             }
             let size = r - l;
-            if self.possible_size[l..r]
+            if self.cells[l..r]
                 .iter()
-                .all(|possible_size| possible_size.count_ones(0..size) == 0)
+                .all(|cell| cell.possible_block_sizes.count_ones(0..size) == 0)
             {
                 self.set_range(
                     l..r,
@@ -455,15 +469,15 @@ impl Line {
     }
     fn set_white_if_the_length_is_confirmed(&mut self) {
         for (l, r) in self.segments_black.segments() {
-            if (l == 0 || self.states[l - 1] == State::White)
-                && (r == self.n || self.states[r] == State::White)
+            if (l == 0 || self.cells[l - 1].state == State::White)
+                && (r == self.n || self.cells[r].state == State::White)
             {
                 continue;
             }
             let size = r - l;
             for j in l..r {
-                if self.possible_size[j].contains(size)
-                    && self.possible_size[j].count_ones(size..self.n) == 1
+                if self.cells[j].possible_block_sizes.contains(size)
+                    && self.cells[j].possible_block_sizes.count_ones(size..self.n) == 1
                 {
                     if l > 0 {
                         self.set(
@@ -486,31 +500,31 @@ impl Line {
     }
     fn set_white_if_too_long(&mut self) {
         for j in 0..self.n {
-            if !(self.states[j] == State::Unconfirmed && self.possible_id(j).len() == 1) {
+            if !(self.cells[j].state == State::Unconfirmed && self.possible_id(j).len() == 1) {
                 continue;
             }
             let id = self.possible_id(j).start;
             let mut size = 1;
-            if j > 0 && matches!(self.states[j - 1], State::Black) {
+            if j > 0 && matches!(self.cells[j - 1].state, State::Black) {
                 size += self.segments_black.size(j - 1);
             }
-            if j + 1 < self.n && matches!(self.states[j + 1], State::Black) {
+            if j + 1 < self.n && matches!(self.cells[j + 1].state, State::Black) {
                 size += self.segments_black.size(j + 1);
             }
-            if size > self.constraint[id] {
+            if size > self.blocks[id].size {
                 self.set(j, State::White, Operation::WhiteIfTooLong(j));
             }
         }
     }
     fn set_white_if_too_short(&mut self) {
         for (l, r) in self.segments_unconfirmed.segments() {
-            if l > 0 && self.states[l - 1] != State::White {
+            if l > 0 && self.cells[l - 1].state != State::White {
                 continue;
             }
-            if r < self.n && self.states[r] != State::White {
+            if r < self.n && self.cells[r].state != State::White {
                 continue;
             }
-            if (l..r).any(|j| self.possible_size[j].ones().next().unwrap_or(0) > r - l) {
+            if (l..r).any(|j| self.cells[j].possible_block_sizes.ones().next().unwrap_or(0) > r - l) {
                 self.set_range(l..r, State::White, Operation::WhiteIfTooShort(l, r));
             }
         }
@@ -522,7 +536,7 @@ impl Display for Line {
             if j > 0 && j % 5 == 0 {
                 write!(f, "|")?;
             }
-            match self.states[j] {
+            match self.cells[j].state {
                 State::Unconfirmed => write!(f, "?")?,
                 State::White => write!(f, "x")?,
                 State::Black => write!(f, "o")?,
@@ -597,7 +611,7 @@ impl Solver {
         while self.advance()?.is_some() {}
         if self.lines[0]
             .iter()
-            .flat_map(|segment| segment.states.clone())
+            .flat_map(|line| line.cells.iter().map(|cell| cell.state))
             .any(|state| matches!(state, State::Unconfirmed))
         {
             Err(SolverError::MultipleSolutions)
@@ -659,7 +673,7 @@ impl Solver {
                 .iter()
                 .map(|(l, r)| r - l)
                 .collect::<Vec<_>>();
-            if v != self.lines[Axis::Row as usize][i].constraint {
+            if v != self.constraints[Axis::Row as usize][i] {
                 return false;
             }
             let v = self.lines[Axis::Column as usize][i]
@@ -668,7 +682,7 @@ impl Solver {
                 .iter()
                 .map(|(l, r)| r - l)
                 .collect::<Vec<_>>();
-            if v != self.lines[Axis::Column as usize][i].constraint {
+            if v != self.constraints[Axis::Column as usize][i] {
                 return false;
             }
         }
@@ -682,10 +696,10 @@ impl Solver {
 
     pub fn state(&self, i: usize, j: usize) -> State {
         assert_eq!(
-            self.lines[Axis::Row as usize][i].states[j],
-            self.lines[Axis::Column as usize][j].states[i]
+            self.lines[Axis::Row as usize][i].cells[j].state,
+            self.lines[Axis::Column as usize][j].cells[i].state
         );
-        self.lines[Axis::Row as usize][i].states[j]
+        self.lines[Axis::Row as usize][i].cells[j].state
     }
 
     pub fn possible_id(&self, axis: Axis, i: usize, j: usize) -> Range<usize> {
@@ -726,7 +740,7 @@ impl std::fmt::Display for Solver {
                 write!(
                     f,
                     "{}",
-                    match self.lines[0][y].states[x] {
+                    match self.lines[0][y].cells[x].state {
                         State::Unconfirmed => ".".to_string(),
                         State::White => "x".to_string(),
                         State::Black => "o".to_string(),
@@ -741,7 +755,7 @@ impl std::fmt::Display for Solver {
                 write!(
                     f,
                     "{}",
-                    match self.lines[1][x].states[y] {
+                    match self.lines[1][x].cells[y].state {
                         State::Unconfirmed => ".".to_string(),
                         State::White => "x".to_string(),
                         State::Black => {
@@ -762,7 +776,7 @@ impl std::fmt::Display for Solver {
                 write!(
                     f,
                     "{}",
-                    match self.lines[0][y].states[x] {
+                    match self.lines[0][y].cells[x].state {
                         State::Unconfirmed => ".".to_string(),
                         State::White => "x".to_string(),
                         State::Black => {
@@ -825,7 +839,7 @@ mod tests {
         line.set_black_if_leftmost_and_rightmost_intersect();
         line.flush_queue().unwrap();
         assert_eq!(
-            line.states,
+            line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
             vec![
                 State::Unconfirmed,
                 State::Black,
@@ -844,7 +858,7 @@ mod tests {
         line.set_black_if_leftmost_and_rightmost_intersect();
         line.flush_queue().unwrap();
         assert_eq!(
-            line.states,
+            line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
             vec![
                 State::Black,
                 State::Black,
@@ -873,7 +887,7 @@ mod tests {
         line.set_black_if_leftmost_and_rightmost_intersect();
         line.flush_queue().unwrap();
         assert_eq!(
-            line.states,
+            line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
             vec![
                 State::Unconfirmed,
                 State::Black,
@@ -907,7 +921,7 @@ mod tests {
             line.set_black_if_leftmost_and_rightmost_intersect();
             line.flush_queue().unwrap();
             assert_eq!(
-                line.states,
+                line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
                 vec![
                     State::Unconfirmed,
                     State::Unconfirmed,
@@ -945,8 +959,8 @@ mod tests {
         line.set_state(5, State::Black);
         line.set_white_if_the_length_is_confirmed();
         line.flush_queue().unwrap();
-        assert_eq!(line.states[3], State::White);
-        assert_eq!(line.states[6], State::White);
+        assert_eq!(line.cells[3].state, State::White);
+        assert_eq!(line.cells[6].state, State::White);
 
         // xoox..... — 左隣が白で確定済みのセグメントは正しくスキップされる
         let mut line = Line::new(9, vec![2, 2]);
@@ -958,10 +972,10 @@ mod tests {
         line.set_white_if_the_length_is_confirmed();
         line.flush_queue().unwrap();
         // すでに両隣が白なので余計な変化はない
-        assert_eq!(line.states[0], State::White);
-        assert_eq!(line.states[1], State::Black);
-        assert_eq!(line.states[2], State::Black);
-        assert_eq!(line.states[3], State::White);
+        assert_eq!(line.cells[0].state, State::White);
+        assert_eq!(line.cells[1].state, State::Black);
+        assert_eq!(line.cells[2].state, State::Black);
+        assert_eq!(line.cells[3].state, State::White);
     }
 
     #[test]
@@ -975,7 +989,7 @@ mod tests {
         line.set_white_if_possible_id_is_empty();
         line.flush_queue().unwrap();
         assert_eq!(
-            line.states,
+            line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
             vec![
                 State::Unconfirmed,
                 State::Black,
@@ -1002,7 +1016,7 @@ mod tests {
         line.set_black_if_left_end_is_confirmed();
         line.flush_queue().unwrap();
         assert_eq!(
-            line.states,
+            line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
             vec![
                 State::Unconfirmed,
                 State::Unconfirmed,
@@ -1030,7 +1044,7 @@ mod tests {
         line.set_black_if_left_end_is_confirmed();
         line.flush_queue().unwrap();
         assert_eq!(
-            line.states,
+            line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
             vec![
                 State::Black,
                 State::Black,
@@ -1085,7 +1099,7 @@ mod tests {
         line.set_black_if_left_end_is_confirmed();
         line.flush_queue().unwrap();
         assert_eq!(
-            line.states,
+            line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
             vec![
                 State::Unconfirmed,
                 State::Unconfirmed,
@@ -1125,7 +1139,7 @@ mod tests {
         line.set_black_if_right_end_is_confirmed();
         line.flush_queue().unwrap();
         assert_eq!(
-            line.states,
+            line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
             vec![
                 State::Unconfirmed,
                 State::Unconfirmed,
@@ -1149,7 +1163,7 @@ mod tests {
         line.set_black_if_right_end_is_confirmed();
         line.flush_queue().unwrap();
         assert_eq!(
-            line.states,
+            line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
             vec![
                 State::Black,
                 State::Black,
@@ -1178,7 +1192,7 @@ mod tests {
         line.set_black_if_both_end_is_confirmed();
         line.flush_queue().unwrap();
         assert_eq!(
-            line.states,
+            line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
             vec![
                 State::Unconfirmed,
                 State::Unconfirmed,
@@ -1207,7 +1221,7 @@ mod tests {
         line.set_white_if_too_long();
         line.flush_queue().unwrap();
         assert_eq!(
-            line.states,
+            line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
             vec![
                 State::Unconfirmed,
                 State::White,
@@ -1235,7 +1249,7 @@ mod tests {
         line.set_white_if_too_short();
         line.flush_queue().unwrap();
         assert_eq!(
-            line.states,
+            line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
             vec![
                 State::Unconfirmed,
                 State::Unconfirmed,
