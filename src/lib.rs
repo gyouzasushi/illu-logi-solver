@@ -95,7 +95,7 @@ struct Line {
 impl Line {
     fn new(n: usize, constraint: Vec<usize>) -> Self {
         let m = constraint.len();
-        let mut possible_size = FixedBitSet::with_capacity(n);
+        let mut possible_size = FixedBitSet::with_capacity(n + 1);
         (0..m).for_each(|id| possible_size.insert(constraint[id]));
         Self {
             n,
@@ -197,7 +197,7 @@ impl Line {
     }
     fn advance(&mut self) -> Result<Option<(Range<usize>, State, Operation)>, LineError> {
         self.next_step = 0;
-        self.update_possible_id();
+        self.update_possible_id()?;
         while !self.has_update() {
             self.execute_step();
             if self.next_step == 0 {
@@ -218,7 +218,7 @@ impl Line {
         }
         Ok(())
     }
-    fn update_possible_id(&mut self) {
+    fn update_possible_id(&mut self) -> Result<(), LineError> {
         let (n, m) = (self.n, self.constraint.len());
         loop {
             let prev = self._possible_id.clone();
@@ -257,7 +257,7 @@ impl Line {
                     }
                 }
                 self.id_range[id].0 = l;
-                for j in 0..l {
+                for j in 0..l.min(n) {
                     self._possible_id[j].1.setmin(id);
                 }
                 l = r + 1;
@@ -320,12 +320,26 @@ impl Line {
             }
         }
 
+        for id in 0..m {
+            let (l, r) = self.id_range[id];
+            if l + self.constraint[id] > r {
+                let j = l.min(n.saturating_sub(1));
+                return Err(LineError::Contradiction(
+                    j,
+                    self.states[j],
+                    State::Black,
+                    Operation::BlackIfLeftmostAndRightmostIntersect(l, l + self.constraint[id]),
+                ));
+            }
+        }
+
         for j in 0..n {
             self.possible_size[j].clear();
             self.possible_id(j)
                 .for_each(|id| self.possible_size[j].insert(self.constraint[id]));
         }
 
+        Ok(())
     }
     fn set_black_if_leftmost_and_rightmost_intersect(&mut self) {
         let m = self.constraint.len();
