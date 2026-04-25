@@ -36,12 +36,12 @@ pub enum State {
 
 #[derive(Clone, Copy, Debug)]
 pub enum Operation {
-    BlackIfLeftmostAndRightmostIntersect(usize, usize),
-    WhiteIfPossibleIdIsEmpty(usize, usize),
-    BlackIfBothEndIsConfirmed(usize, usize),
-    BlackIfLeftEndIsConfirmed(usize, usize),
-    BlackIfRightEndIsConfirmed(usize, usize),
-    WhiteIfTheLengthIsConfirmed(usize, usize),
+    BlackIfOverlap(usize, usize),
+    WhiteIfNoBlockCovers(usize, usize),
+    BlackIfBounded(usize, usize),
+    BlackIfLeftBounded(usize, usize),
+    BlackIfRightBounded(usize, usize),
+    WhiteIfSegmentComplete(usize, usize),
     WhiteIfTooLong(usize),
     WhiteIfTooShort(usize, usize),
     SameStateAsOrthogonal,
@@ -177,14 +177,14 @@ impl Line {
         !self.queue.is_empty()
     }
     const STEPS: [fn(&mut Line); 8] = [
-        Line::set_black_if_leftmost_and_rightmost_intersect,
-        Line::set_black_if_both_end_is_confirmed,
-        Line::set_black_if_left_end_is_confirmed,
-        Line::set_black_if_right_end_is_confirmed,
-        Line::set_white_if_the_length_is_confirmed,
+        Line::set_black_if_overlap,
+        Line::set_black_if_bounded,
+        Line::set_black_if_left_bounded,
+        Line::set_black_if_right_bounded,
+        Line::set_white_if_segment_complete,
         Line::set_white_if_too_long,
         Line::set_white_if_too_short,
-        Line::set_white_if_possible_id_is_empty,
+        Line::set_white_if_no_block_covers,
     ];
 
     fn execute_step(&mut self) {
@@ -325,7 +325,7 @@ impl Line {
                     j,
                     self.cells[j].state,
                     State::Black,
-                    Operation::BlackIfLeftmostAndRightmostIntersect(
+                    Operation::BlackIfOverlap(
                         start, start + self.blocks[id].size,
                     ),
                 ));
@@ -342,7 +342,8 @@ impl Line {
 
         Ok(())
     }
-    fn set_black_if_leftmost_and_rightmost_intersect(&mut self) {
+    // 最左配置と最右配置の重複部分は必ず黒
+    fn set_black_if_overlap(&mut self) {
         let num_blocks = self.blocks.len();
         for id in 0..num_blocks {
             let l = self.blocks[id].possible_placement.start;
@@ -354,11 +355,12 @@ impl Line {
             self.set_range(
                 l..r,
                 State::Black,
-                Operation::BlackIfLeftmostAndRightmostIntersect(l, r),
+                Operation::BlackIfOverlap(l, r),
             );
         }
     }
-    fn set_white_if_possible_id_is_empty(&mut self) {
+    // どのブロックにも属せないセルは白
+    fn set_white_if_no_block_covers(&mut self) {
         let mut l = 0;
         while l < self.n {
             l = (l..self.n)
@@ -370,12 +372,13 @@ impl Line {
             self.set_range(
                 l..r,
                 State::White,
-                Operation::WhiteIfPossibleIdIsEmpty(l, r),
+                Operation::WhiteIfNoBlockCovers(l, r),
             );
             l = r;
         }
     }
-    fn set_black_if_left_end_is_confirmed(&mut self) {
+    // 非白領域の左端が確定しているとき、最小ブロックサイズ分だけ右へ黒を延ばせる
+    fn set_black_if_left_bounded(&mut self) {
         for (j, _) in self.segments_black.segments() {
             let l = self.segments_non_white.left(j);
             let r_max = self.segments_non_white.right(j);
@@ -395,11 +398,12 @@ impl Line {
             self.set_range(
                 j..r,
                 State::Black,
-                Operation::BlackIfLeftEndIsConfirmed(l, r),
+                Operation::BlackIfLeftBounded(l, r),
             );
         }
     }
-    fn set_black_if_right_end_is_confirmed(&mut self) {
+    // 非白領域の右端が確定しているとき、最小ブロックサイズ分だけ左へ黒を延ばせる
+    fn set_black_if_right_bounded(&mut self) {
         for (_, j) in self.segments_black.segments() {
             let j = j - 1;
             let r = self.segments_non_white.right(j);
@@ -420,11 +424,12 @@ impl Line {
             self.set_range(
                 l..j,
                 State::Black,
-                Operation::BlackIfRightEndIsConfirmed(l, r),
+                Operation::BlackIfRightBounded(l, r),
             );
         }
     }
-    fn set_black_if_both_end_is_confirmed(&mut self) {
+    // 両端が確定した非白領域で全セルの可能ブロックサイズが領域長以上なら全体が黒
+    fn set_black_if_bounded(&mut self) {
         for (l, r) in self.segments_non_white.segments() {
             if (l..r).all(|j| self.cells[j].state == State::Unconfirmed) {
                 continue;
@@ -437,12 +442,13 @@ impl Line {
                 self.set_range(
                     l..r,
                     State::Black,
-                    Operation::BlackIfBothEndIsConfirmed(l, r),
+                    Operation::BlackIfBounded(l, r),
                 );
             }
         }
     }
-    fn set_white_if_the_length_is_confirmed(&mut self) {
+    // 黒セグメントのサイズが最大の可能ブロックサイズと一致すれば両端は白
+    fn set_white_if_segment_complete(&mut self) {
         for (l, r) in self.segments_black.segments() {
             if (l == 0 || self.cells[l - 1].state == State::White)
                 && (r == self.n || self.cells[r].state == State::White)
@@ -458,14 +464,14 @@ impl Line {
                         self.set(
                             l - 1,
                             State::White,
-                            Operation::WhiteIfTheLengthIsConfirmed(l, r),
+                            Operation::WhiteIfSegmentComplete(l, r),
                         );
                     }
                     if r < self.n {
                         self.set(
                             r,
                             State::White,
-                            Operation::WhiteIfTheLengthIsConfirmed(l, r),
+                            Operation::WhiteIfSegmentComplete(l, r),
                         );
                     }
                     break;
@@ -473,6 +479,7 @@ impl Line {
             }
         }
     }
+    // このセルを黒にすると唯一の可能ブロックのサイズを超えるなら白
     fn set_white_if_too_long(&mut self) {
         for j in 0..self.n {
             if !(self.cells[j].state == State::Unconfirmed && self.possible_id(j).len() == 1) {
@@ -491,6 +498,7 @@ impl Line {
             }
         }
     }
+    // 両端が確定した未確定領域の最小ブロックサイズが領域長を超えるなら全体が白
     fn set_white_if_too_short(&mut self) {
         for (l, r) in self.segments_unconfirmed.segments() {
             if l > 0 && self.cells[l - 1].state != State::White {
@@ -808,11 +816,11 @@ mod tests {
     }
 
     #[test]
-    fn test_set_black_if_leftmost_and_rightmost_intersect() {
+    fn test_set_black_if_overlap() {
         // .....
         let mut line = Line::new(5, vec![4]);
         line.update_possible_id().unwrap();
-        line.set_black_if_leftmost_and_rightmost_intersect();
+        line.set_black_if_overlap();
         line.flush_queue().unwrap();
         assert_eq!(
             line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
@@ -831,7 +839,7 @@ mod tests {
         // .....
         let mut line = Line::new(5, vec![3, 1]);
         line.update_possible_id().unwrap();
-        line.set_black_if_leftmost_and_rightmost_intersect();
+        line.set_black_if_overlap();
         line.flush_queue().unwrap();
         assert_eq!(
             line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
@@ -854,13 +862,13 @@ mod tests {
         line.set_state(2, State::Black);
         line.set_state(3, State::Black);
         line.update_possible_id().unwrap();
-        line.set_black_if_leftmost_and_rightmost_intersect();
+        line.set_black_if_overlap();
         line.flush_queue().unwrap();
 
         // ..........
         let mut line = Line::new(10, vec![3, 2, 2]);
         line.update_possible_id().unwrap();
-        line.set_black_if_leftmost_and_rightmost_intersect();
+        line.set_black_if_overlap();
         line.flush_queue().unwrap();
         assert_eq!(
             line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
@@ -894,7 +902,7 @@ mod tests {
         line.update_possible_id().unwrap();
         for _ in 0..2 {
             line.update_possible_id().unwrap();
-            line.set_black_if_leftmost_and_rightmost_intersect();
+            line.set_black_if_overlap();
             line.flush_queue().unwrap();
             assert_eq!(
                 line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
@@ -928,12 +936,12 @@ mod tests {
         }
     }
     #[test]
-    fn test_set_white_if_the_length_is_confirmed() {
+    fn test_set_white_if_segment_complete() {
         // ....oo....
         let mut line = Line::new(10, vec![2, 2]);
         line.set_state(4, State::Black);
         line.set_state(5, State::Black);
-        line.set_white_if_the_length_is_confirmed();
+        line.set_white_if_segment_complete();
         line.flush_queue().unwrap();
         assert_eq!(line.cells[3].state, State::White);
         assert_eq!(line.cells[6].state, State::White);
@@ -945,7 +953,7 @@ mod tests {
         line.set_state(2, State::Black);
         line.set_state(3, State::White);
         line.update_possible_id().unwrap();
-        line.set_white_if_the_length_is_confirmed();
+        line.set_white_if_segment_complete();
         line.flush_queue().unwrap();
         // すでに両隣が白なので余計な変化はない
         assert_eq!(line.cells[0].state, State::White);
@@ -955,14 +963,14 @@ mod tests {
     }
 
     #[test]
-    fn test_set_white_if_possible_id_is_empty() {
+    fn test_set_white_if_no_block_covers() {
         // .o......o.
         let mut line = Line::new(10, vec![2, 2]);
         line.set_state(1, State::Black);
         line.set_state(8, State::Black);
         line.update_possible_id().unwrap();
-        line.set_black_if_leftmost_and_rightmost_intersect();
-        line.set_white_if_possible_id_is_empty();
+        line.set_black_if_overlap();
+        line.set_white_if_no_block_covers();
         line.flush_queue().unwrap();
         assert_eq!(
             line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
@@ -983,13 +991,13 @@ mod tests {
         assert_eq!(line.confirmed_id(8), Some(1));
     }
     #[test]
-    fn test_set_black_if_left_end_is_confirmed() {
+    fn test_set_black_if_left_bounded() {
         // ....xo....
         let mut line = Line::new(10, vec![2, 2]);
         line.set_state(4, State::White);
         line.set_state(5, State::Black);
         line.update_possible_id().unwrap();
-        line.set_black_if_left_end_is_confirmed();
+        line.set_black_if_left_bounded();
         line.flush_queue().unwrap();
         assert_eq!(
             line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
@@ -1016,8 +1024,8 @@ mod tests {
         line.set_state(9, State::White);
         line.set_state(12, State::Black);
         line.update_possible_id().unwrap();
-        line.set_black_if_leftmost_and_rightmost_intersect();
-        line.set_black_if_left_end_is_confirmed();
+        line.set_black_if_overlap();
+        line.set_black_if_left_bounded();
         line.flush_queue().unwrap();
         assert_eq!(
             line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
@@ -1070,9 +1078,9 @@ mod tests {
         line.set_state(14, State::White);
         line.set_state(17, State::White);
         line.update_possible_id().unwrap();
-        line.set_black_if_leftmost_and_rightmost_intersect();
-        line.set_black_if_leftmost_and_rightmost_intersect();
-        line.set_black_if_left_end_is_confirmed();
+        line.set_black_if_overlap();
+        line.set_black_if_overlap();
+        line.set_black_if_left_bounded();
         line.flush_queue().unwrap();
         assert_eq!(
             line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
@@ -1106,13 +1114,13 @@ mod tests {
     }
 
     #[test]
-    fn test_set_black_if_right_end_is_confirmed() {
+    fn test_set_black_if_right_bounded() {
         // ....ox....
         let mut line = Line::new(10, vec![2, 2]);
         line.set_state(4, State::Black);
         line.set_state(5, State::White);
         line.update_possible_id().unwrap();
-        line.set_black_if_right_end_is_confirmed();
+        line.set_black_if_right_bounded();
         line.flush_queue().unwrap();
         assert_eq!(
             line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
@@ -1136,7 +1144,7 @@ mod tests {
         let mut line = Line::new(10, vec![2, 2]);
         line.set_state(1, State::Black);
         line.set_state(2, State::White);
-        line.set_black_if_right_end_is_confirmed();
+        line.set_black_if_right_bounded();
         line.flush_queue().unwrap();
         assert_eq!(
             line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
@@ -1158,14 +1166,14 @@ mod tests {
     }
 
     #[test]
-    fn test_set_black_if_both_end_is_confirmed() {
+    fn test_set_black_if_bounded() {
         // ...x.o.x...
         let mut line = Line::new(11, vec![3, 3]);
         line.set_state(3, State::White);
         line.set_state(5, State::Black);
         line.set_state(7, State::White);
         line.update_possible_id().unwrap();
-        line.set_black_if_both_end_is_confirmed();
+        line.set_black_if_bounded();
         line.flush_queue().unwrap();
         assert_eq!(
             line.cells.iter().map(|c| c.state).collect::<Vec<_>>(),
@@ -1193,7 +1201,7 @@ mod tests {
         let mut line = Line::new(10, vec![1, 2]);
         line.set_state(2, State::Black);
         line.update_possible_id().unwrap();
-        line.set_black_if_leftmost_and_rightmost_intersect();
+        line.set_black_if_overlap();
         line.set_white_if_too_long();
         line.flush_queue().unwrap();
         assert_eq!(
@@ -1221,7 +1229,7 @@ mod tests {
         line.set_state(6, State::White);
         line.set_state(8, State::White);
         line.update_possible_id().unwrap();
-        line.set_black_if_leftmost_and_rightmost_intersect();
+        line.set_black_if_overlap();
         line.set_white_if_too_short();
         line.flush_queue().unwrap();
         assert_eq!(
