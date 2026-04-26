@@ -105,7 +105,10 @@ impl Line {
         };
         let blocks = constraint
             .into_iter()
-            .map(|size| Block { size, possible_placement: 0..n })
+            .map(|size| Block {
+                size,
+                possible_placement: 0..n,
+            })
             .collect();
         Self {
             n,
@@ -249,7 +252,9 @@ impl Line {
                     while let Some(j) = (l..r).rfind(|&j| self.cells[j].state == State::White) {
                         l = j + 1;
                         r = l + self.blocks[id].size;
-                        if r > n { break; }
+                        if r > n {
+                            break;
+                        }
                     }
                 }
                 self.blocks[id].possible_placement.start = l;
@@ -288,7 +293,9 @@ impl Line {
                     while let Some(j) = (l..r).find(|&j| self.cells[j].state == State::White) {
                         r = j;
                         l = r.wrapping_sub(self.blocks[id].size);
-                        if l >= n { break; }
+                        if l >= n {
+                            break;
+                        }
                     }
                 }
                 self.blocks[id].possible_placement.end = r;
@@ -325,9 +332,7 @@ impl Line {
                     j,
                     self.cells[j].state,
                     State::Black,
-                    Operation::BlackIfOverlap(
-                        start, start + self.blocks[id].size,
-                    ),
+                    Operation::BlackIfOverlap(start, start + self.blocks[id].size),
                 ));
             }
         }
@@ -336,7 +341,9 @@ impl Line {
             self.cells[j].possible_block_sizes.clear();
             let ids = self.cells[j].possible_block_ids.clone();
             for id in ids {
-                self.cells[j].possible_block_sizes.insert(self.blocks[id].size);
+                self.cells[j]
+                    .possible_block_sizes
+                    .insert(self.blocks[id].size);
             }
         }
 
@@ -352,11 +359,7 @@ impl Line {
                 continue;
             }
             let (l, r) = (r - self.blocks[id].size, l + self.blocks[id].size);
-            self.set_range(
-                l..r,
-                State::Black,
-                Operation::BlackIfOverlap(l, r),
-            );
+            self.set_range(l..r, State::Black, Operation::BlackIfOverlap(l, r));
         }
     }
     // どのブロックにも属せないセルは白
@@ -369,11 +372,7 @@ impl Line {
             let r = (l..self.n)
                 .find(|&j| !self.possible_id(j).is_empty())
                 .unwrap_or(self.n);
-            self.set_range(
-                l..r,
-                State::White,
-                Operation::WhiteIfNoBlockCovers(l, r),
-            );
+            self.set_range(l..r, State::White, Operation::WhiteIfNoBlockCovers(l, r));
             l = r;
         }
     }
@@ -389,17 +388,19 @@ impl Line {
                 .min()
                 .unwrap_or(0);
             while r < r_max && {
-                min.setmin(self.cells[r].possible_block_sizes.ones().next().unwrap_or(0));
+                min.setmin(
+                    self.cells[r]
+                        .possible_block_sizes
+                        .ones()
+                        .next()
+                        .unwrap_or(0),
+                );
                 min
             } > r - l
             {
                 r += 1;
             }
-            self.set_range(
-                j..r,
-                State::Black,
-                Operation::BlackIfLeftBounded(l, r),
-            );
+            self.set_range(j..r, State::Black, Operation::BlackIfLeftBounded(l, r));
         }
     }
     // 非白領域の右端が確定しているとき、最小ブロックサイズ分だけ左へ黒を延ばせる
@@ -415,17 +416,19 @@ impl Line {
                 .min()
                 .unwrap_or(0);
             while l > l_min && {
-                min.setmin(self.cells[l].possible_block_sizes.ones().next().unwrap_or(0));
+                min.setmin(
+                    self.cells[l]
+                        .possible_block_sizes
+                        .ones()
+                        .next()
+                        .unwrap_or(0),
+                );
                 min
             } > r - l
             {
                 l -= 1;
             }
-            self.set_range(
-                l..j,
-                State::Black,
-                Operation::BlackIfRightBounded(l, r),
-            );
+            self.set_range(l..j, State::Black, Operation::BlackIfRightBounded(l, r));
         }
     }
     // 両端が確定した非白領域で全セルの可能ブロックサイズが領域長以上なら全体が黒
@@ -439,11 +442,7 @@ impl Line {
                 .iter()
                 .all(|cell| cell.possible_block_sizes.count_ones(0..size) == 0)
             {
-                self.set_range(
-                    l..r,
-                    State::Black,
-                    Operation::BlackIfBounded(l, r),
-                );
+                self.set_range(l..r, State::Black, Operation::BlackIfBounded(l, r));
             }
         }
     }
@@ -461,18 +460,10 @@ impl Line {
                     && self.cells[j].possible_block_sizes.count_ones(size..self.n) == 1
                 {
                     if l > 0 {
-                        self.set(
-                            l - 1,
-                            State::White,
-                            Operation::WhiteIfSegmentComplete(l, r),
-                        );
+                        self.set(l - 1, State::White, Operation::WhiteIfSegmentComplete(l, r));
                     }
                     if r < self.n {
-                        self.set(
-                            r,
-                            State::White,
-                            Operation::WhiteIfSegmentComplete(l, r),
-                        );
+                        self.set(r, State::White, Operation::WhiteIfSegmentComplete(l, r));
                     }
                     break;
                 }
@@ -507,7 +498,14 @@ impl Line {
             if r < self.n && self.cells[r].state != State::White {
                 continue;
             }
-            if (l..r).any(|j| self.cells[j].possible_block_sizes.ones().next().unwrap_or(0) > r - l) {
+            if (l..r).any(|j| {
+                self.cells[j]
+                    .possible_block_sizes
+                    .ones()
+                    .next()
+                    .unwrap_or(0)
+                    > r - l
+            }) {
                 self.set_range(l..r, State::White, Operation::WhiteIfTooShort(l, r));
             }
         }
@@ -640,6 +638,23 @@ impl Solver {
                 }));
             } else {
                 self.queue.pop_front().unwrap();
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn hint(&self) -> Result<Option<Action>, SolverError> {
+        for step_idx in 0..Line::STEPS.len() {
+            for &axis in &[Axis::Row, Axis::Column] {
+                for i in 0..self.n {
+                    let mut line = self.lines[axis as usize][i].clone();
+                    line.update_possible_id()
+                        .map_err(|e| e.to_solver_error(axis, i))?;
+                    Line::STEPS[step_idx](&mut line);
+                    if let Some((range, state, by)) = line.queue.pop_front() {
+                        return Ok(Some(Action { axis, i, range, state, by }));
+                    }
+                }
             }
         }
         Ok(None)

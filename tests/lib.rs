@@ -263,6 +263,17 @@ fn test_advance() {
 }
 
 #[test]
+fn test_hint() {
+    let mut solver = Solver::new([
+        vec![vec![2, 1], vec![3], vec![2, 2], vec![1, 2], vec![1, 1]],
+        vec![vec![3, 1], vec![4], vec![1, 1], vec![2], vec![1, 2]],
+    ]);
+    assert!(solver.hint().unwrap().is_some());
+    solver.solve().unwrap();
+    assert!(solver.hint().unwrap().is_none());
+}
+
+#[test]
 fn test_rollback() {
     let mut solver = Solver::new([
         vec![
