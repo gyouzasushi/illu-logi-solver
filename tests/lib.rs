@@ -18,7 +18,7 @@ fn test_no_solution() {
 
     let mut solver = Solver::new([vec![vec![1], vec![1]], vec![vec![1], vec![1]]]);
     let result = solver.solve();
-    assert!(matches!(result, Err(SolverError::MultipleSolutions)));
+    assert!(matches!(result, Err(SolverError::Indeterminate)));
 }
 
 #[test]

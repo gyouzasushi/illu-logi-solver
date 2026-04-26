@@ -550,7 +550,7 @@ pub enum SolverError {
         by: Operation,
     },
     #[error("could not find a solution: there might be multiple possible solutions.")]
-    MultipleSolutions,
+    Indeterminate,
 }
 
 pub struct Solver {
@@ -598,7 +598,7 @@ impl Solver {
             .flat_map(|line| line.cells.iter().map(|cell| cell.state))
             .any(|state| matches!(state, State::Unconfirmed))
         {
-            Err(SolverError::MultipleSolutions)
+            Err(SolverError::Indeterminate)
         } else {
             Ok(())
         }
