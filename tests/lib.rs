@@ -268,7 +268,10 @@ fn test_hint() {
         vec![vec![2, 1], vec![3], vec![2, 2], vec![1, 2], vec![1, 1]],
         vec![vec![3, 1], vec![4], vec![1, 1], vec![2], vec![1, 2]],
     ]);
-    assert!(solver.hint().unwrap().is_some());
+    let hint = solver.hint().unwrap().expect("a hint should be available");
+    // possible_ids は action.range と同じ並び・同じ長さで、各セルの候補ブロックが揃う。
+    assert_eq!(hint.possible_ids.len(), hint.action.range.len());
+    assert!(hint.possible_ids.iter().all(|ids| !ids.is_empty()));
     solver.solve().unwrap();
     assert!(solver.hint().unwrap().is_none());
 }
