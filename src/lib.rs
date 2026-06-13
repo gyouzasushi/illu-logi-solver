@@ -545,6 +545,15 @@ pub struct Action {
     pub by: Operation,
 }
 
+/// 確定の根拠ブロックまで含む、自己完結したヒント。
+#[derive(Debug, Clone)]
+pub struct Hint {
+    pub action: Action,
+    /// `action.range` と同じ並びで、各セルの候補ブロックID範囲。
+    /// ヒント算出と同一スナップショット上で読み出すため、常に `action` と整合する。
+    pub possible_ids: Vec<Range<usize>>,
+}
+
 #[derive(Debug, Error)]
 pub enum SolverError {
     #[error("contradiction on {axis:?}[{i}][{j}]: attempt to set {new_state:?} by {by:?}, but {current_state:?} is already set.")]
@@ -652,7 +661,7 @@ impl Solver {
         Ok(None)
     }
 
-    pub fn hint(&self) -> Result<Option<Action>, SolverError> {
+    pub fn hint(&self) -> Result<Option<Hint>, SolverError> {
         for step_idx in 0..Line::STEPS.len() {
             for &axis in &[Axis::Row, Axis::Column] {
                 for i in 0..self.n {
@@ -661,7 +670,12 @@ impl Solver {
                         .map_err(|e| e.to_solver_error(axis, i))?;
                     Line::STEPS[step_idx](&mut line);
                     if let Some((range, state, by)) = line.queue.pop_front() {
-                        return Ok(Some(Action { axis, i, range, state, by }));
+                        // ヒント算出に使った同じスナップショット（この clone）から候補IDを読み出す。
+                        // 別呼び出し・別スナップショットを挟まないため、常に action と整合する。
+                        let possible_ids =
+                            range.clone().map(|j| line.possible_id(j)).collect();
+                        let action = Action { axis, i, range, state, by };
+                        return Ok(Some(Hint { action, possible_ids }));
                     }
                 }
             }
@@ -708,10 +722,6 @@ impl Solver {
             self.lines[Axis::Column as usize][j].cells[i].state
         );
         self.lines[Axis::Row as usize][i].cells[j].state
-    }
-
-    pub fn possible_id(&self, axis: Axis, i: usize, j: usize) -> Range<usize> {
-        self.lines[axis as usize][i].possible_id(j)
     }
 }
 
