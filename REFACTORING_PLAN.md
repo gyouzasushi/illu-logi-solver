@@ -70,7 +70,7 @@ assert_eq!(solver.state(1, 1), State::Unconfirmed); // 黒に確定できるは�
 ## 設計上の問題（バグ予備軍・中優先）
 
 1. **`Solver::new` が panic する**（`assert_eq!` による正方形チェックのみ）。ライブラリとしては `Result` を返すべきで、あわせて入力検証を追加する: ブロックサイズ 0 の拒否、`sum(blocks) + gaps <= n` の検証。現状 `vec![0]` などを渡すと内部不変条件が壊れる（`wrapping_sub` 周りの演算が前提を失う）。`with_grid` では盤面サイズ・状態の整合も検証する。
-2. **正方形盤面限定**。イラストロジックは長方形が普通。`n` を `(height, width)` に分離する。`Line` は既に自分の長さを持っているので、変更は `Solver` 側の対称性の仮定（`queue` 初期化、`solve` の走査、`judge`、`Display`）に限られる。
+2. **正方形盤面限定**。`n` を `(height, width)` に分離する。目的は長方形パズル対応そのものではなく、同じ `n` が高さ・幅・行長の3役を兼ねることで i/j の取り違えがテストで検出できない（正方形は転置しても同じ形）状態の解消。`Line` は既に自分の長さを持っているので、変更は `Solver` 側の対称性の仮定（`queue` 初期化、`solve` の走査、`judge`、`Display`）に限られる。**対応時は `tests/soundness.rs` に長方形（例: 5x8, 7x3）のランダム盤面を必ず追加すること**。正方形のテストだけでは取り違え検出という導入意図が実現されない。
 3. **`update_possible_id` の矛盾報告が `Operation::BlackIfOverlap` を流用**（`src/lib.rs:344`）。「ブロックの置き場所がない」という別種の矛盾なので、専用のエラー表現（例: `Operation::NoPlacement(id)` か `SolverError` の新 variant）にする。
 4. **`update` に `Unconfirmed` を渡すと Contradiction 扱い**（`src/lib.rs:170`）。推論が書き込む状態は白か黒だけなので、キューに積む型を `enum Determined { White, Black }` のような確定値専用型にし、型レベルで排除する。
 5. **`hint()` が残留キューを拾い得る**。`Solver::advance` は `Line` のキューから1件だけ取り出すため、`advance` と `hint` を混ぜて使うと `hint` がステップ実行結果ではなく残留項目を返し、「最も安いステップ順」の保証が崩れる。`Session` 経由（毎回新品の `Solver`）では発生しないが、コアAPIとして `advance` と併用した場合の仕様を明文化するか、クローン後にキューを先に消化してから探索する。
