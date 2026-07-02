@@ -252,7 +252,7 @@ fn show_gap_cases() {
             println!("=== gap case iter {iter} ===");
             println!("rows: {:?}", constraints[0]);
             println!("cols: {:?}", constraints[1]);
-            println!("solver stuck at:\n{solver}");
+            println!("solver stuck at:\n{}", solver.debug_display());
         }
     }
 }

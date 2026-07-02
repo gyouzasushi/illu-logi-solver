@@ -286,89 +286,94 @@ impl Solver {
     }
 }
 
-impl std::fmt::Display for Solver {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Solver {
+    /// 1マス幅の区切り線（5マスごとに空白を挟んだ `-` の並び）。
+    fn separator_line(width: usize) -> String {
+        let mut line = String::new();
+        for x in 0..width {
+            if x > 0 && x % 5 == 0 {
+                line.push(' ');
+            }
+            line.push('-');
+        }
+        line
+    }
+
+    /// 1盤面をテキスト行のリストとして描画する。`cell(y, x)` はセル
+    /// `(y, x)` の表示文字列（1文字幅を想定）を返す。5行・5列ごとに
+    /// 区切り線／区切り文字を挟む。`Display` と [`Solver::debug_display`]
+    /// はどちらもこのヘルパに畳んでいるので、盤面の描き方（罫線の間隔など）
+    /// を変えるときはここ1箇所を直せばよい。
+    fn render_board(&self, cell: impl Fn(usize, usize) -> String) -> Vec<String> {
+        let mut lines = Vec::with_capacity(self.height);
         for y in 0..self.height {
             if y > 0 && y % 5 == 0 {
-                for x in 0..self.width {
-                    if x > 0 && x % 5 == 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "-")?;
-                }
-                write!(f, "  ")?;
-                for x in 0..self.width {
-                    if x > 0 && x % 5 == 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "-")?;
-                }
-                write!(f, "  ")?;
-                for x in 0..self.width {
-                    if x > 0 && x % 5 == 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "-")?;
-                }
-                writeln!(f)?;
+                lines.push(Self::separator_line(self.width));
             }
+            let mut line = String::new();
             for x in 0..self.width {
                 if x > 0 && x % 5 == 0 {
-                    write!(f, "|")?;
+                    line.push('|');
                 }
-                write!(
-                    f,
-                    "{}",
-                    match self.lines[0][y].cells[x].state {
-                        State::Unconfirmed => ".".to_string(),
-                        State::White => "x".to_string(),
-                        State::Black => "o".to_string(),
-                    }
-                )?
+                line.push_str(&cell(y, x));
             }
-            write!(f, "  ")?;
-            for x in 0..self.width {
-                if x > 0 && x % 5 == 0 {
-                    write!(f, "|")?;
-                }
-                write!(
-                    f,
-                    "{}",
-                    match self.lines[1][x].cells[y].state {
-                        State::Unconfirmed => ".".to_string(),
-                        State::White => "x".to_string(),
-                        State::Black => {
-                            if let Some(id) = self.lines[1][x].confirmed_id(y) {
-                                format!("{id}")
-                            } else {
-                                "o".to_string()
-                            }
-                        }
-                    }
-                )?
-            }
-            write!(f, "  ")?;
-            for x in 0..self.width {
-                if x > 0 && x % 5 == 0 {
-                    write!(f, "|")?;
-                }
-                write!(
-                    f,
-                    "{}",
-                    match self.lines[0][y].cells[x].state {
-                        State::Unconfirmed => ".".to_string(),
-                        State::White => "x".to_string(),
-                        State::Black => {
-                            if let Some(id) = self.lines[0][y].confirmed_id(x) {
-                                format!("{id}")
-                            } else {
-                                "o".to_string()
-                            }
-                        }
-                    }
-                )?
-            }
-            writeln!(f)?;
+            lines.push(line);
+        }
+        lines
+    }
+
+    /// セル `(y, x)` の素の表示文字列（`.`/`x`/`o`）。
+    fn plain_cell(&self, y: usize, x: usize) -> String {
+        match self.lines[Axis::Row as usize][y].cells[x].state {
+            State::Unconfirmed => ".".to_string(),
+            State::White => "x".to_string(),
+            State::Black => "o".to_string(),
+        }
+    }
+
+    /// セル `(y, x)` の表示文字列。黒セルは確定済みブロックIDが分かれば
+    /// それを数字で表示し（`Line::confirmed_id`）、分からなければ `o`。
+    fn cell_with_confirmed_id(state: State, confirmed_id: Option<usize>) -> String {
+        match state {
+            State::Unconfirmed => ".".to_string(),
+            State::White => "x".to_string(),
+            State::Black => confirmed_id.map_or_else(|| "o".to_string(), |id| id.to_string()),
+        }
+    }
+
+    /// 3面併記のデバッグ表示: 素の盤面、列 `Line` 視点で確定ブロックIDを
+    /// 添えた盤面、行 `Line` 視点で確定ブロックIDを添えた盤面を横に並べる。
+    /// `Display`（[`std::fmt::Display`] 実装）は素の盤面だけを描く簡素な
+    /// 表示なので、行・列どちらの視点で見てもブロックIDが一致しているか
+    /// （内部不変条件の目視確認）などデバッグ用途にはこちらを使う。
+    pub fn debug_display(&self) -> String {
+        let plain = self.render_board(|y, x| self.plain_cell(y, x));
+        let by_column = self.render_board(|y, x| {
+            let line = &self.lines[Axis::Column as usize][x];
+            Self::cell_with_confirmed_id(line.cells[y].state, line.confirmed_id(y))
+        });
+        let by_row = self.render_board(|y, x| {
+            let line = &self.lines[Axis::Row as usize][y];
+            Self::cell_with_confirmed_id(line.cells[x].state, line.confirmed_id(x))
+        });
+
+        let mut out = String::new();
+        for ((row1, row2), row3) in plain.iter().zip(&by_column).zip(&by_row) {
+            out.push_str(row1);
+            out.push_str("  ");
+            out.push_str(row2);
+            out.push_str("  ");
+            out.push_str(row3);
+            out.push('\n');
+        }
+        out
+    }
+}
+
+impl std::fmt::Display for Solver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for line in self.render_board(|y, x| self.plain_cell(y, x)) {
+            writeln!(f, "{line}")?;
         }
         Ok(())
     }
