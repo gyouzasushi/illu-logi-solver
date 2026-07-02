@@ -59,7 +59,6 @@ pub struct HintBlock {
 
 #[derive(Clone)]
 pub(crate) struct Line {
-    n: usize,
     pub(crate) cells: Vec<Cell>,
     blocks: Vec<Block>,
     pub(crate) segments_black: Segments,
@@ -84,7 +83,6 @@ impl Line {
             })
             .collect();
         Self {
-            n,
             cells: vec![default_cell; n],
             blocks,
             segments_black: Segments::new(vec![false; n]),
@@ -93,6 +91,11 @@ impl Line {
             next_step: 0,
             queue: VecDeque::new(),
         }
+    }
+    /// この行のマス数。`cells.len()` と重複した値を別フィールドに持たず、
+    /// 常に `cells` を単一の情報源にする。
+    fn n(&self) -> usize {
+        self.cells.len()
     }
     pub(crate) fn possible_id(&self, j: usize) -> Range<usize> {
         self.cells[j].possible_block_ids.clone()
@@ -218,7 +221,7 @@ impl Line {
     // 両方の添字に使っており、`enumerate()`化すると可読性が落ちるため許容する。
     #[allow(clippy::needless_range_loop)]
     pub(crate) fn update_possible_id(&mut self) -> Result<(), LineError> {
-        let n = self.n;
+        let n = self.n();
         let num_blocks = self.blocks.len();
         loop {
             let mut changed = false;
@@ -356,13 +359,13 @@ impl Line {
     // どのブロックにも属せないセルは白
     fn set_white_if_no_block_covers(&mut self) {
         let mut l = 0;
-        while l < self.n {
-            l = (l..self.n)
+        while l < self.n() {
+            l = (l..self.n())
                 .find(|&j| self.possible_id(j).is_empty())
-                .unwrap_or(self.n);
-            let r = (l..self.n)
+                .unwrap_or(self.n());
+            let r = (l..self.n())
                 .find(|&j| !self.possible_id(j).is_empty())
-                .unwrap_or(self.n);
+                .unwrap_or(self.n());
             self.set_range(
                 l..r,
                 Determined::White,
@@ -432,7 +435,7 @@ impl Line {
     fn set_white_if_segment_complete(&mut self) {
         for (l, r) in self.segments_black.segments() {
             if (l == 0 || self.cells[l - 1].state == State::White)
-                && (r == self.n || self.cells[r].state == State::White)
+                && (r == self.n() || self.cells[r].state == State::White)
             {
                 continue;
             }
@@ -446,7 +449,7 @@ impl Line {
                             Operation::WhiteIfSegmentComplete(l, r),
                         );
                     }
-                    if r < self.n {
+                    if r < self.n() {
                         self.set(
                             r,
                             Determined::White,
@@ -460,7 +463,7 @@ impl Line {
     }
     // このセルを黒にすると唯一の可能ブロックのサイズを超えるなら白
     fn set_white_if_too_long(&mut self) {
-        for j in 0..self.n {
+        for j in 0..self.n() {
             if !(self.cells[j].state == State::Unconfirmed && self.possible_id(j).len() == 1) {
                 continue;
             }
@@ -469,7 +472,7 @@ impl Line {
             if j > 0 && matches!(self.cells[j - 1].state, State::Black) {
                 size += self.segments_black.size(j - 1);
             }
-            if j + 1 < self.n && matches!(self.cells[j + 1].state, State::Black) {
+            if j + 1 < self.n() && matches!(self.cells[j + 1].state, State::Black) {
                 size += self.segments_black.size(j + 1);
             }
             if size > self.blocks[id].size {
@@ -483,7 +486,7 @@ impl Line {
             if l > 0 && self.cells[l - 1].state != State::White {
                 continue;
             }
-            if r < self.n && self.cells[r].state != State::White {
+            if r < self.n() && self.cells[r].state != State::White {
                 continue;
             }
             if (l..r).any(|j| self.min_possible_size(j).unwrap_or(0) > r - l) {
@@ -494,7 +497,7 @@ impl Line {
 }
 impl Display for Line {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for j in 0..self.n {
+        for j in 0..self.n() {
             if j > 0 && j % 5 == 0 {
                 write!(f, "|")?;
             }
