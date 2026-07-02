@@ -277,8 +277,8 @@ fn test_hint() {
 }
 
 #[test]
-fn test_rollback() {
-    let mut solver = Solver::new([
+fn test_session_rollback() {
+    let constraints = [
         vec![
             vec![5, 1],
             vec![2, 3],
@@ -303,6 +303,97 @@ fn test_rollback() {
             vec![1, 1, 1, 1],
             vec![2, 3],
         ],
-    ]);
-    let _ = solver.rollback(3);
+    ];
+    // 正解盤面から、矛盾なく置ける値を拾って set に使う。
+    let mut solved = Solver::new(constraints_for_10x10());
+    solved.solve().unwrap();
+    let correct = |i: usize, j: usize| solved.state(i, j);
+
+    let mut session = Session::new(constraints);
+    session.set(0, 0, correct(0, 0));
+    session.set(0, 1, correct(0, 1));
+    session.set(1, 1, correct(1, 1));
+    assert_eq!(session.state(1, 1), correct(1, 1));
+
+    // 履歴を先頭1件に切り詰めると、それ以降の set は巻き戻る。
+    session.rollback(1);
+    assert_eq!(session.state(0, 0), correct(0, 0));
+    assert_eq!(session.state(0, 1), State::Unconfirmed);
+    assert_eq!(session.state(1, 1), State::Unconfirmed);
+
+    // 巻き戻し後も deduce/judge は現盤面から使い捨てソルバで正しく動く。
+    let grid = session.deduce().expect("この10x10は一意に解けるはず");
+    for (i, row) in grid.iter().enumerate() {
+        for (j, &cell) in row.iter().enumerate() {
+            assert_eq!(cell, solved.state(i, j));
+        }
+    }
+}
+
+fn constraints_for_10x10() -> [Vec<Vec<usize>>; 2] {
+    [
+        vec![
+            vec![5, 1],
+            vec![2, 3],
+            vec![2, 2, 1],
+            vec![3, 2, 2],
+            vec![1, 3, 1],
+            vec![2, 3],
+            vec![1, 3, 1],
+            vec![1, 1, 2, 2],
+            vec![1, 6, 1],
+            vec![5, 2],
+        ],
+        vec![
+            vec![1, 2, 2],
+            vec![7],
+            vec![2, 1, 1, 2],
+            vec![1, 1, 4],
+            vec![2, 1, 1, 2],
+            vec![9],
+            vec![3, 1, 3],
+            vec![3, 1],
+            vec![1, 1, 1, 1],
+            vec![2, 3],
+        ],
+    ]
+}
+
+// REFACTORING_PLAN.md「確認済みバグ」Bug 1 の再現シナリオ:
+// `Line::set_state` は `Unconfirmed` への遷移で何もしないため、
+// 黒 → 未確定 に戻しても `segments_black` にセルが残る旧実装があった
+// （`Solver::set` はこれをそのまま公開していた）。`Session` は `judge`
+// を呼ぶたびに現盤面から `Solver::with_grid` で使い捨てソルバを
+// 組み立てるため、巻き戻しの残留自体が発生しない設計になっている。
+#[test]
+fn test_session_bug1_unconfirmed_rollback_then_correct_placement_judges_true() {
+    let mut session = Session::new([vec![vec![1], vec![1]], vec![vec![1], vec![1]]]);
+    session.set(0, 0, State::Black);
+    session.set(0, 0, State::Unconfirmed); // 旧 Solver::set ではここで segments_black が残留する
+    session.set(0, 0, State::White);
+    session.set(0, 1, State::Black);
+    session.set(1, 1, State::White);
+    session.set(1, 0, State::Black);
+    assert!(session.judge()); // 正解を置いたのに false になっていた（Bug 1）
+}
+
+// REFACTORING_PLAN.md「確認済みバグ」Bug 2 の再現シナリオ:
+// 旧 `Solver::set` はキューに行・列を再投入しないため、`solve` が
+// 一度キューを消化し切った後に `set` で情報を与えても、以降の
+// `solve`/`advance` は何も推論しなかった。`Session::deduce` は
+// 呼ばれるたびに新品のソルバを組み立てるので「キューの消化」という
+// 概念自体が存在せず、追加の `set` がそのまま次の `deduce` に伝播する。
+#[test]
+fn test_session_bug2_set_after_exhausted_deduce_propagates() {
+    let mut session = Session::new([vec![vec![1], vec![1]], vec![vec![1], vec![1]]]);
+    assert!(matches!(session.deduce(), Err(SolverError::Indeterminate))); // 2通りの解があり未確定
+
+    session.set(0, 0, State::Black); // 正解の1つを教える
+    let grid = session
+        .deduce()
+        .expect("(0,0)=Black を与えれば一意に解けるはず"); // 旧実装ではまだ Indeterminate のままだった
+    assert_eq!(grid[0][0], State::Black);
+    assert_eq!(grid[0][1], State::White);
+    assert_eq!(grid[1][0], State::White);
+    assert_eq!(grid[1][1], State::Black); // 黒に確定できるはずが未確定のままだった（Bug 2）
 }

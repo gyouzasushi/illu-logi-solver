@@ -1,4 +1,7 @@
+mod session;
 mod util;
+
+pub use session::Session;
 
 use crate::util::{Segments, SetMinMax};
 use fixedbitset::FixedBitSet;
@@ -572,6 +575,13 @@ pub enum SolverError {
     Indeterminate,
 }
 
+/// 制約（＋任意で初期盤面）を受け取って推論するだけの、不変入力の推論エンジン。
+///
+/// 構築後に外部から盤面を書き換える手段は持たない（`possible_block_ids` が
+/// 狭まる一方向にしか更新されないという内部不変条件が構築後に壊れないことを
+/// 保証するための設計）。ユーザーが盤面を埋めながらヒントや矛盾チェックを
+/// 受けるような対話的な用途には、この `Solver` を毎回使い捨てで組み立てる
+/// 薄い層である [`Session`] を使うこと。
 pub struct Solver {
     n: usize,
     constraints: [Vec<Vec<usize>>; 2],
@@ -606,8 +616,23 @@ impl Solver {
         }
     }
 
-    fn clear(&mut self) {
-        *self = Self::new(std::mem::take(&mut self.constraints));
+    /// `new` 同様に構築したうえで、`grid` の `Unconfirmed` 以外のセルを
+    /// 確定済みの種として行・列両方の `Line` に流し込む。
+    ///
+    /// 新品の `Line` に前進方向で流し込むだけなので `possible_block_ids` の
+    /// 単調性は壊れない。矛盾検出はここでは行わず、後続の `solve`/`advance`/
+    /// `hint` に委ねる。
+    pub fn with_grid(constraints: [Vec<Vec<usize>>; 2], grid: &[Vec<State>]) -> Self {
+        let mut solver = Self::new(constraints);
+        for (i, row) in grid.iter().enumerate() {
+            for (j, &state) in row.iter().enumerate() {
+                if state != State::Unconfirmed {
+                    solver.lines[Axis::Row as usize][i].set_state(j, state);
+                    solver.lines[Axis::Column as usize][j].set_state(i, state);
+                }
+            }
+        }
+        solver
     }
 
     pub fn solve(&mut self) -> Result<(), SolverError> {
@@ -621,20 +646,6 @@ impl Solver {
         } else {
             Ok(())
         }
-    }
-
-    pub fn rollback(&mut self, t: usize) -> Result<Option<Action>, SolverError> {
-        if self.turn_count > t {
-            self.clear();
-        }
-        let mut ret = None;
-        while self.turn_count < t {
-            ret = self.advance()?;
-            if ret.is_none() {
-                break;
-            }
-        }
-        Ok(ret)
     }
 
     pub fn advance(&mut self) -> Result<Option<Action>, SolverError> {
@@ -720,11 +731,6 @@ impl Solver {
             }
         }
         true
-    }
-
-    pub fn set(&mut self, i: usize, j: usize, state: State) {
-        self.lines[Axis::Row as usize][i].set_state(j, state);
-        self.lines[Axis::Column as usize][j].set_state(i, state);
     }
 
     pub fn state(&self, i: usize, j: usize) -> State {
