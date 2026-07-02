@@ -166,7 +166,7 @@ fn run_experiment(grids: impl Iterator<Item = Vec<Vec<bool>>>, label: &str, max_
     for grid in grids {
         total += 1;
         let constraints = constraints_of(&grid);
-        let mut solver = Solver::new(constraints.clone());
+        let mut solver = Solver::new(constraints.clone()).unwrap();
         match solver.solve() {
             Ok(()) => solver_ok += 1,
             Err(SolverError::Indeterminate) => match dp_fixpoint(&constraints) {
@@ -245,7 +245,7 @@ fn show_gap_cases() {
             })
             .collect();
         let constraints = constraints_of(&grid);
-        let mut solver = Solver::new(constraints.clone());
+        let mut solver = Solver::new(constraints.clone()).unwrap();
         if matches!(solver.solve(), Err(SolverError::Indeterminate))
             && dp_fixpoint(&constraints) == Some(true)
         {

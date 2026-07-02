@@ -11,7 +11,7 @@
 //! （`Unconfirmed` への巻き戻しでセグメント情報が残留する／`solve` 消化後の
 //! 書き込みが伝播しない）は「発生し得ない設計」として解消される。
 
-use crate::{Hint, Solver, SolverError, State};
+use crate::{solver::validate_constraints, Hint, Solver, SolverError, State};
 
 /// `Session::set` 1回分の記録。`undo`/`rollback` の再生に使う。
 #[derive(Debug, Clone, Copy)]
@@ -33,15 +33,17 @@ pub struct Session {
 
 impl Session {
     /// 制約から空盤面のセッションを作る（現状は正方形前提）。
-    pub fn new(constraints: [Vec<Vec<usize>>; 2]) -> Self {
-        assert_eq!(constraints[0].len(), constraints[1].len());
-        let n = constraints[0].len();
+    ///
+    /// `Solver::new` と同じ検証（ブロックサイズ 0 の拒否、
+    /// `sum(blocks) + (blocks.len() - 1) <= n` ）を行う。
+    pub fn new(constraints: [Vec<Vec<usize>>; 2]) -> Result<Self, SolverError> {
+        let n = validate_constraints(&constraints)?;
         let grid = vec![vec![State::Unconfirmed; n]; n];
-        Self {
+        Ok(Self {
             constraints,
             grid,
             history: Vec::new(),
-        }
+        })
     }
 
     fn n(&self) -> usize {
@@ -63,8 +65,14 @@ impl Session {
     }
 
     /// 現盤面を種にした使い捨てソルバを構築する。
+    ///
+    /// `Session` は構築時（`new`）に制約を検証済みで、`grid` は常に
+    /// その制約と同じ次元に保たれる（`rebuild_grid` 参照）。そのためここでの
+    /// `with_grid` の失敗は `Session` 自体の不変条件違反であり、`expect` で
+    /// 検出してよい。
     fn solver(&self) -> Solver {
         Solver::with_grid(self.constraints.clone(), &self.grid)
+            .expect("Session の盤面は常に制約の次元と整合するように保たれる")
     }
 
     /// 現盤面から、最も安い推論ステップ1件を非破壊で求める。
@@ -81,13 +89,14 @@ impl Session {
     /// 盤面・履歴は一切変更しない。一意に確定しきれない場合も、そこまでで
     /// 確定した部分盤面を `Ok` で返す。全確定したかどうかは、返った盤面に
     /// `State::Unconfirmed` が残っているかで判定できる。`Err` になるのは
-    /// 矛盾（`SolverError::Contradiction`）のみ。
+    /// 矛盾（`SolverError::Contradiction`）のみ（制約自体の検証エラーは
+    /// `Session::new` の時点で弾かれているため、ここでは起こり得ない）。
     pub fn deduce(&self) -> Result<Vec<Vec<State>>, SolverError> {
         let mut solver = self.solver();
         match solver.solve() {
             // Indeterminate でもソルバ内部には部分確定が残っているので読み出す。
             Ok(()) | Err(SolverError::Indeterminate) => {}
-            Err(e @ SolverError::Contradiction { .. }) => return Err(e),
+            Err(e) => return Err(e),
         }
         let n = self.n();
         Ok((0..n)
@@ -140,7 +149,7 @@ mod tests {
     // ここではモジュール内部の細かい積み木（undo/rollback の履歴再生）だけ見る。
     #[test]
     fn undo_and_rollback_replay_history() {
-        let mut session = Session::new([vec![vec![1], vec![1]], vec![vec![1], vec![1]]]);
+        let mut session = Session::new([vec![vec![1], vec![1]], vec![vec![1], vec![1]]]).unwrap();
         session.set(0, 0, State::Black);
         session.set(0, 1, State::White);
         session.set(1, 0, State::White);

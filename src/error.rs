@@ -35,4 +35,26 @@ pub enum SolverError {
     },
     #[error("could not find a solution: there might be multiple possible solutions.")]
     Indeterminate,
+    #[error("{axis:?}[{i}] contains a block of size 0, which is not a valid constraint.")]
+    InvalidBlockSize { axis: Axis, i: usize },
+    #[error(
+        "{axis:?}[{i}] cannot fit in a line of length {line_len}: blocks require at least sum(blocks) + (blocks.len() - 1) cells."
+    )]
+    ConstraintTooLong {
+        axis: Axis,
+        i: usize,
+        line_len: usize,
+    },
+    #[error(
+        "constraints[Row] has {rows} entries but constraints[Column] has {cols}: the board must be square for now."
+    )]
+    ConstraintAxisLengthMismatch { rows: usize, cols: usize },
+    #[error("grid has {actual} rows but constraints expect {expected} rows.")]
+    GridHeightMismatch { expected: usize, actual: usize },
+    #[error("grid row {i} has {actual} cells but constraints expect {expected}.")]
+    GridWidthMismatch {
+        i: usize,
+        expected: usize,
+        actual: usize,
+    },
 }

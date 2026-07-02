@@ -34,20 +34,90 @@ fn test_no_solution() {
     let mut solver = Solver::new([
         vec![vec![], vec![3, 1], vec![], vec![], vec![]],
         vec![vec![1, 3], vec![], vec![], vec![], vec![]],
-    ]);
+    ])
+    .unwrap();
     let result = solver.solve();
     assert!(matches!(result, Err(SolverError::Contradiction { .. })));
 
     let mut solver = Solver::new([
         vec![vec![5], vec![1], vec![], vec![], vec![]],
         vec![vec![5], vec![], vec![], vec![], vec![]],
-    ]);
+    ])
+    .unwrap();
     let result = solver.solve();
     assert!(matches!(result, Err(SolverError::Contradiction { .. })));
 
-    let mut solver = Solver::new([vec![vec![1], vec![1]], vec![vec![1], vec![1]]]);
+    let mut solver = Solver::new([vec![vec![1], vec![1]], vec![vec![1], vec![1]]]).unwrap();
     let result = solver.solve();
     assert!(matches!(result, Err(SolverError::Indeterminate)));
+}
+
+#[test]
+fn test_invalid_constraints_are_rejected() {
+    // ブロックサイズ 0 は拒否される。
+    let result = Solver::new([vec![vec![0]], vec![vec![1]]]);
+    assert!(matches!(
+        result,
+        Err(SolverError::InvalidBlockSize {
+            axis: Axis::Row,
+            i: 0
+        })
+    ));
+
+    // sum(blocks) + (blocks.len() - 1) > 線長 は拒否される
+    // (3 + 1 + 1 = 5 > 3行分の線長)。
+    let result = Solver::new([
+        vec![vec![3, 1], vec![], vec![]],
+        vec![vec![], vec![], vec![]],
+    ]);
+    assert!(matches!(
+        result,
+        Err(SolverError::ConstraintTooLong {
+            axis: Axis::Row,
+            i: 0,
+            line_len: 3
+        })
+    ));
+
+    // ぴったり収まる場合は拒否されない
+    // (3 + 1 + 1 = 5 <= 5行分の線長)。
+    assert!(Solver::new([vec![vec![3, 1]; 5], vec![vec![]; 5]]).is_ok());
+
+    // rows と cols の本数が食い違う場合は拒否される。
+    let result = Solver::new([vec![vec![1]], vec![vec![1]; 2]]);
+    assert!(matches!(
+        result,
+        Err(SolverError::ConstraintAxisLengthMismatch { rows: 1, cols: 2 })
+    ));
+
+    // Session::new も同じ検証を行う。
+    assert!(matches!(
+        Session::new([vec![vec![0]], vec![vec![1]]]),
+        Err(SolverError::InvalidBlockSize { .. })
+    ));
+
+    // with_grid は盤面の次元と制約の次元の整合も検証する。
+    let result = Solver::with_grid(
+        [vec![vec![1]], vec![vec![1]]],
+        &[vec![State::Black], vec![State::White]],
+    );
+    assert!(matches!(
+        result,
+        Err(SolverError::GridHeightMismatch {
+            expected: 1,
+            actual: 2
+        })
+    ));
+
+    let result = Solver::with_grid([vec![vec![1]], vec![vec![1]]], &[vec![State::Black; 2]]);
+    assert!(matches!(
+        result,
+        Err(SolverError::GridWidthMismatch {
+            i: 0,
+            expected: 1,
+            actual: 2
+        })
+    ));
 }
 
 #[test]
@@ -55,11 +125,12 @@ fn test_5x5() {
     let _solver = Solver::new([
         vec![vec![2, 1], vec![3], vec![2, 2], vec![1, 2], vec![1, 1]],
         vec![vec![3, 1], vec![4], vec![1, 1], vec![2], vec![1, 2]],
-    ]);
+    ])
+    .unwrap();
 }
 #[test]
 fn test_10x10() {
-    let mut solver = Solver::new(constraints_for_10x10());
+    let mut solver = Solver::new(constraints_for_10x10()).unwrap();
     assert!(solver.solve().is_ok());
     assert!(solver.judge());
 }
@@ -100,7 +171,8 @@ fn test_15x15() {
             vec![1, 1, 3, 1],
             vec![2, 1, 1, 5],
         ],
-    ]);
+    ])
+    .unwrap();
     assert!(solver.solve().is_ok());
     assert!(solver.judge());
 }
@@ -152,7 +224,8 @@ fn test_20x20() {
             vec![6, 3, 3, 1],
             vec![1, 1, 3, 1, 2, 1],
         ],
-    ]);
+    ])
+    .unwrap();
     assert!(solver.solve().is_ok());
     assert!(solver.judge());
 }
@@ -224,7 +297,8 @@ fn test_30x30() {
             vec![2, 6, 2, 1, 1, 1, 3],
             vec![4, 1, 1, 3, 1, 3, 1, 2, 2],
         ],
-    ]);
+    ])
+    .unwrap();
     assert!(solver.solve().is_ok());
     assert!(solver.judge());
 }
@@ -234,10 +308,11 @@ fn test_advance() {
     let mut solver = Solver::new([
         vec![vec![2, 1], vec![3], vec![2, 2], vec![1, 2], vec![1, 1]],
         vec![vec![3, 1], vec![4], vec![1, 1], vec![2], vec![1, 2]],
-    ]);
+    ])
+    .unwrap();
     while solver.advance().unwrap().is_some() {}
 
-    let mut solver = Solver::new(constraints_for_10x10());
+    let mut solver = Solver::new(constraints_for_10x10()).unwrap();
     while solver.advance().unwrap().is_some() {}
 }
 
@@ -246,7 +321,8 @@ fn test_hint() {
     let mut solver = Solver::new([
         vec![vec![2, 1], vec![3], vec![2, 2], vec![1, 2], vec![1, 1]],
         vec![vec![3, 1], vec![4], vec![1, 1], vec![2], vec![1, 2]],
-    ]);
+    ])
+    .unwrap();
     let hint = solver.hint().unwrap().expect("a hint should be available");
     // possible_ids は action.range と同じ並び・同じ長さで、各セルの候補ブロックが揃う。
     assert_eq!(hint.possible_ids.len(), hint.action.range.len());
@@ -258,11 +334,11 @@ fn test_hint() {
 #[test]
 fn test_session_rollback() {
     // 正解盤面から、矛盾なく置ける値を拾って set に使う。
-    let mut solved = Solver::new(constraints_for_10x10());
+    let mut solved = Solver::new(constraints_for_10x10()).unwrap();
     solved.solve().unwrap();
     let correct = |i: usize, j: usize| solved.state(i, j);
 
-    let mut session = Session::new(constraints_for_10x10());
+    let mut session = Session::new(constraints_for_10x10()).unwrap();
     session.set(0, 0, correct(0, 0));
     session.set(0, 1, correct(0, 1));
     session.set(1, 1, correct(1, 1));
@@ -291,7 +367,7 @@ fn test_session_rollback() {
 // 組み立てるため、巻き戻しの残留自体が発生しない設計になっている。
 #[test]
 fn test_session_bug1_unconfirmed_rollback_then_correct_placement_judges_true() {
-    let mut session = Session::new([vec![vec![1], vec![1]], vec![vec![1], vec![1]]]);
+    let mut session = Session::new([vec![vec![1], vec![1]], vec![vec![1], vec![1]]]).unwrap();
     session.set(0, 0, State::Black);
     session.set(0, 0, State::Unconfirmed); // 旧 Solver::set ではここで segments_black が残留する
     session.set(0, 0, State::White);
@@ -309,7 +385,7 @@ fn test_session_bug1_unconfirmed_rollback_then_correct_placement_judges_true() {
 // 概念自体が存在せず、追加の `set` がそのまま次の `deduce` に伝播する。
 #[test]
 fn test_session_bug2_set_after_exhausted_deduce_propagates() {
-    let mut session = Session::new([vec![vec![1], vec![1]], vec![vec![1], vec![1]]]);
+    let mut session = Session::new([vec![vec![1], vec![1]], vec![vec![1], vec![1]]]).unwrap();
     // 2通りの解があり確定しないが、deduce は部分盤面（全 Unconfirmed）を Ok で返す。
     let grid = session.deduce().unwrap();
     assert!(grid

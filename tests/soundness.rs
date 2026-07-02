@@ -35,7 +35,7 @@ fn constraints_of(grid: &[Vec<bool>]) -> [Vec<Vec<usize>>; 2] {
 }
 
 fn check(grid: &[Vec<bool>]) {
-    let mut solver = Solver::new(constraints_of(grid));
+    let mut solver = Solver::new(constraints_of(grid)).unwrap();
     match solver.solve() {
         Ok(()) => {
             assert!(solver.judge(), "judge failed for solvable grid: {grid:?}");
@@ -50,8 +50,8 @@ fn check(grid: &[Vec<bool>]) {
                 }
             }
         }
-        Err(e @ SolverError::Contradiction { .. }) => {
-            panic!("contradiction on solvable grid: {grid:?}\n{e}");
+        Err(e) => {
+            panic!("unexpected solve() error on solvable grid: {grid:?}\n{e}");
         }
     }
 }

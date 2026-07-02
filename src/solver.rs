@@ -27,6 +27,44 @@ impl From<Axis> for usize {
     }
 }
 
+/// 制約を検証し、盤面の1辺の長さ `n`（現状は正方形前提）を返す。
+///
+/// 検証内容: 各行・各列の制約についてブロックサイズ 0 を拒否し、
+/// `sum(blocks) + (blocks.len() - 1) <= n` を要求する。
+pub(crate) fn validate_constraints(
+    constraints: &[Vec<Vec<usize>>; 2],
+) -> Result<usize, SolverError> {
+    if constraints[0].len() != constraints[1].len() {
+        return Err(SolverError::ConstraintAxisLengthMismatch {
+            rows: constraints[0].len(),
+            cols: constraints[1].len(),
+        });
+    }
+    let n = constraints[0].len();
+    for &axis in &[Axis::Row, Axis::Column] {
+        for (i, blocks) in constraints[axis as usize].iter().enumerate() {
+            validate_line_constraint(axis, i, blocks, n)?;
+        }
+    }
+    Ok(n)
+}
+
+fn validate_line_constraint(
+    axis: Axis,
+    i: usize,
+    blocks: &[usize],
+    line_len: usize,
+) -> Result<(), SolverError> {
+    if blocks.contains(&0) {
+        return Err(SolverError::InvalidBlockSize { axis, i });
+    }
+    let min_len = blocks.iter().sum::<usize>() + blocks.len().saturating_sub(1);
+    if min_len > line_len {
+        return Err(SolverError::ConstraintTooLong { axis, i, line_len });
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub struct Action {
     pub axis: Axis,
@@ -60,9 +98,13 @@ pub struct Solver {
     turn_count: usize,
 }
 impl Solver {
-    pub fn new(constraints: [Vec<Vec<usize>>; 2]) -> Self {
-        assert_eq!(constraints[0].len(), constraints[1].len());
-        let n = constraints[0].len();
+    /// 制約からソルバを構築する。
+    ///
+    /// 入力検証: 各行・列の制約についてブロックサイズ 0 を拒否し、
+    /// `sum(blocks) + (blocks.len() - 1) <= 線長` を要求する
+    /// （満たさない制約はどう埋めても盤面に収まらない）。
+    pub fn new(constraints: [Vec<Vec<usize>>; 2]) -> Result<Self, SolverError> {
+        let n = validate_constraints(&constraints)?;
         let lines = [
             constraints[0]
                 .iter()
@@ -77,13 +119,13 @@ impl Solver {
             .iter()
             .flat_map(|&axis| (0..n).map(move |i| (axis, i)))
             .collect();
-        Self {
+        Ok(Self {
             n,
             constraints,
             lines,
             queue,
             turn_count: 0,
-        }
+        })
     }
 
     /// `new` 同様に構築したうえで、`grid` の `Unconfirmed` 以外のセルを
@@ -91,9 +133,28 @@ impl Solver {
     ///
     /// 新品の `Line` に前進方向で流し込むだけなので `possible_block_ids` の
     /// 単調性は壊れない。矛盾検出はここでは行わず、後続の `solve`/`advance`/
-    /// `hint` に委ねる。
-    pub fn with_grid(constraints: [Vec<Vec<usize>>; 2], grid: &[Vec<State>]) -> Self {
-        let mut solver = Self::new(constraints);
+    /// `hint` に委ねる。制約の検証に加え、`grid` の次元が制約の次元
+    /// （`n` 行 × `n` 列）と一致することも検証する。
+    pub fn with_grid(
+        constraints: [Vec<Vec<usize>>; 2],
+        grid: &[Vec<State>],
+    ) -> Result<Self, SolverError> {
+        let mut solver = Self::new(constraints)?;
+        if grid.len() != solver.n {
+            return Err(SolverError::GridHeightMismatch {
+                expected: solver.n,
+                actual: grid.len(),
+            });
+        }
+        for (i, row) in grid.iter().enumerate() {
+            if row.len() != solver.n {
+                return Err(SolverError::GridWidthMismatch {
+                    i,
+                    expected: solver.n,
+                    actual: row.len(),
+                });
+            }
+        }
         for (i, row) in grid.iter().enumerate() {
             for (j, &state) in row.iter().enumerate() {
                 if state != State::Unconfirmed {
@@ -102,7 +163,7 @@ impl Solver {
                 }
             }
         }
-        solver
+        Ok(solver)
     }
 
     pub fn solve(&mut self) -> Result<(), SolverError> {
