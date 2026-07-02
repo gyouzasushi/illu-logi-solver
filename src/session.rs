@@ -114,6 +114,65 @@ impl Session {
         self.solver().judge()
     }
 
+    /// 制約だけから使い捨てソルバを構築する（`grid` を種にしない点が
+    /// [`Session::solver`] と異なる）。制約は `new` で検証済みなので、
+    /// ここでの構築失敗は `Session` 自体の不変条件違反として `expect` で
+    /// 検出してよい。
+    fn solver_from_constraints_only(&self) -> Solver {
+        Solver::new(self.constraints.clone())
+            .expect("Session の制約は new() で検証済みなので常に構築できる")
+    }
+
+    /// 制約だけから求めた正解と現盤面を突き合わせ、食い違う確定セルの
+    /// 座標 `(i, j)` を返す。
+    ///
+    /// `hint`/`deduce` は現盤面（ユーザーの記入を含む）を種にソルバを
+    /// 構築するため、ユーザーが誤って置いた黒がそのまま推論の前提に
+    /// なり、以後の確定がその誤りを引きずってしまう弱点がある。
+    /// `mistakes` はこれを避けるため、`grid` を種にせず**制約のみ**から
+    /// 解いた結果を「正解」として使う。
+    ///
+    /// 比較は次の2条件を両方満たすセルについてのみ行う: ユーザー側が
+    /// `State::Unconfirmed`（未記入）でないこと、かつ制約だけの解答側が
+    /// `State::Unconfirmed`（まだ確定できていない）でないこと。前者は
+    /// 「書いていないマスは間違いではない」ため、後者は「制約だけからは
+    /// まだ判断がつかないマスについて、ユーザー側の記入の是非を判定
+    /// しようがない」ため対象外にする。
+    ///
+    /// # 制約だけでは一意に解けない場合の設計判断
+    ///
+    /// 制約だけの解答が一意に定まらない（`SolverError::Indeterminate`）
+    /// 場合でも、`solve` はそこまでに確定できた部分解を返す（`deduce` と
+    /// 同じ挙動）。この部分解を使って比較を続ける、つまり「制約だけの
+    /// 段階で確定できたセルに限って間違いを検出し、それ以上はあいまいな
+    /// ままにする」という best-effort な設計にした。全く判定しない
+    /// （`Indeterminate` をそのまま `Err` として伝播する）案も検討したが、
+    /// 採用しなかった: `deduce` が既に「部分解を返す」という前例を作って
+    /// おり、`mistakes` だけ別挙動にする理由がないこと、また多くの実用的な
+    /// 盤面ではパズル全体は一意に解けなくても各行の内部だけで確定できる
+    /// マスがそれなりにあり、それだけでも間違いを早期に指摘できる価値が
+    /// あるためである。制約自体が矛盾していて解を持たない場合
+    /// （`SolverError::Contradiction`/`NoPlacement`）はそのまま `Err` を返す。
+    pub fn mistakes(&self) -> Result<Vec<(usize, usize)>, SolverError> {
+        let mut solver = self.solver_from_constraints_only();
+        match solver.solve() {
+            Ok(()) | Err(SolverError::Indeterminate) => {}
+            Err(e) => return Err(e),
+        }
+        let (height, width) = (self.height(), self.width());
+        let mut mistakes = Vec::new();
+        for i in 0..height {
+            for j in 0..width {
+                let user = self.grid[i][j];
+                let correct = solver.state(i, j);
+                if user != State::Unconfirmed && correct != State::Unconfirmed && user != correct {
+                    mistakes.push((i, j));
+                }
+            }
+        }
+        Ok(mistakes)
+    }
+
     fn rebuild_grid(&mut self) {
         let (height, width) = (self.height(), self.width());
         self.grid = vec![vec![State::Unconfirmed; width]; height];

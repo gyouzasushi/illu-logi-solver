@@ -455,3 +455,67 @@ fn test_session_bug2_set_after_exhausted_deduce_propagates() {
     assert_eq!(grid[1][0], State::White);
     assert_eq!(grid[1][1], State::Black); // 黒に確定できるはずが未確定のままだった（Bug 2）
 }
+
+// Session::mistakes（間違い検出、任意機能）のテスト。
+//
+// 一意に解ける2x2: row0=[2]（両方黒）、row1=[]（両方白）。行だけの推論で
+// 即座に一意確定するので、mistakes の「制約だけから解く」検証に使うには
+// 十分単純。
+fn constraints_for_deterministic_2x2() -> [Vec<Vec<usize>>; 2] {
+    [vec![vec![2], vec![]], vec![vec![1], vec![1]]]
+}
+
+#[test]
+fn test_mistakes_no_mistakes_when_grid_matches_constraints() {
+    let mut session = Session::new(constraints_for_deterministic_2x2()).unwrap();
+    session.set(0, 0, State::Black);
+    session.set(0, 1, State::Black);
+    session.set(1, 0, State::White);
+    // (1,1) は未記入のまま。
+    assert_eq!(session.mistakes().unwrap(), Vec::new());
+}
+
+#[test]
+fn test_mistakes_detects_wrong_cell() {
+    let mut session = Session::new(constraints_for_deterministic_2x2()).unwrap();
+    session.set(0, 0, State::White); // 誤り: 制約上は必ず Black
+    session.set(0, 1, State::Black); // 正しい
+    session.set(1, 0, State::Black); // 誤り: 制約上は必ず White
+    assert_eq!(session.mistakes().unwrap(), vec![(0, 0), (1, 0)]);
+}
+
+#[test]
+fn test_mistakes_ignores_unfilled_cells() {
+    let session = Session::new(constraints_for_deterministic_2x2()).unwrap();
+    // 何も置いていない盤面はどのマスも「間違い」ではない
+    // （Unconfirmed は「まだ書いていない」であって「誤って書いた」ではない）。
+    assert_eq!(session.mistakes().unwrap(), Vec::new());
+}
+
+// 制約だけからは一切確定しない（完全にあいまいな）パズルの場合、
+// mistakes は誰の記入も「間違い」と指摘しない（設計判断: Session::mistakes
+// のdocコメント参照）。ユーザーが2通りの正解のどちらか一方を書いていても、
+// 制約だけの解答側が全セル Unconfirmed のままなので比較対象がなく、
+// 何も報告されない。
+#[test]
+fn test_mistakes_reports_nothing_when_constraints_alone_are_fully_ambiguous() {
+    let mut session = Session::new([vec![vec![1], vec![1]], vec![vec![1], vec![1]]]).unwrap();
+    session.set(0, 0, State::Black);
+    session.set(1, 1, State::Black);
+    assert_eq!(session.mistakes().unwrap(), Vec::new());
+}
+
+// 制約自体が（盤面の記入とは無関係に）どうやっても満たせない場合、
+// mistakes は deduce/solve と同様にエラーを伝播する。
+#[test]
+fn test_mistakes_propagates_error_when_constraints_are_unsatisfiable() {
+    let session = Session::new([
+        vec![vec![], vec![3, 1], vec![], vec![], vec![]],
+        vec![vec![1, 3], vec![], vec![], vec![], vec![]],
+    ])
+    .unwrap();
+    assert!(matches!(
+        session.mistakes(),
+        Err(SolverError::Contradiction { .. } | SolverError::NoPlacement { .. })
+    ));
+}
