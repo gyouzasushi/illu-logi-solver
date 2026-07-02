@@ -3,7 +3,6 @@ use crate::{
     operation::Operation,
     segments::{Segments, SetMinMax},
 };
-use fixedbitset::FixedBitSet;
 use std::{collections::VecDeque, fmt::Display, ops::Range};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -17,7 +16,6 @@ pub enum State {
 pub(crate) struct Cell {
     pub(crate) state: State,
     possible_block_ids: Range<usize>,
-    possible_block_sizes: FixedBitSet,
 }
 
 #[derive(Clone)]
@@ -41,12 +39,9 @@ pub(crate) struct Line {
 impl Line {
     pub(crate) fn new(n: usize, constraint: Vec<usize>) -> Self {
         let num_blocks = constraint.len();
-        let mut possible_block_sizes = FixedBitSet::with_capacity(n + 1);
-        (0..num_blocks).for_each(|id| possible_block_sizes.insert(constraint[id]));
         let default_cell = Cell {
             state: State::Unconfirmed,
             possible_block_ids: 0..num_blocks,
-            possible_block_sizes,
         };
         let blocks = constraint
             .into_iter()
@@ -68,6 +63,14 @@ impl Line {
     }
     pub(crate) fn possible_id(&self, j: usize) -> Range<usize> {
         self.cells[j].possible_block_ids.clone()
+    }
+    // セル `j` の候補ブロックID範囲に含まれるブロックのうち、最小/最大のサイズ。
+    // ブロック数は小さいので素朴に走査する。候補が空集合なら None。
+    fn min_possible_size(&self, j: usize) -> Option<usize> {
+        self.possible_id(j).map(|id| self.blocks[id].size).min()
+    }
+    fn max_possible_size(&self, j: usize) -> Option<usize> {
+        self.possible_id(j).map(|id| self.blocks[id].size).max()
     }
     fn set(&mut self, j: usize, state: State, by: Operation) {
         self.set_range(j..j + 1, state, by)
@@ -287,16 +290,6 @@ impl Line {
             }
         }
 
-        for j in 0..n {
-            self.cells[j].possible_block_sizes.clear();
-            let ids = self.cells[j].possible_block_ids.clone();
-            for id in ids {
-                self.cells[j]
-                    .possible_block_sizes
-                    .insert(self.blocks[id].size);
-            }
-        }
-
         Ok(())
     }
     // 最左配置と最右配置の重複部分は必ず黒
@@ -332,19 +325,12 @@ impl Line {
             let l = self.segments_non_white.left(j);
             let r_max = self.segments_non_white.right(j);
             let mut r = j;
-            let mut min = self.cells[l..=r]
-                .iter()
-                .map(|cell| cell.possible_block_sizes.ones().next().unwrap_or(0))
+            let mut min = (l..=r)
+                .map(|j| self.min_possible_size(j).unwrap_or(0))
                 .min()
                 .unwrap_or(0);
             while r < r_max && {
-                min.setmin(
-                    self.cells[r]
-                        .possible_block_sizes
-                        .ones()
-                        .next()
-                        .unwrap_or(0),
-                );
+                min.setmin(self.min_possible_size(r).unwrap_or(0));
                 min
             } > r - l
             {
@@ -360,19 +346,12 @@ impl Line {
             let r = self.segments_non_white.right(j);
             let l_min = self.segments_non_white.left(j);
             let mut l = j;
-            let mut min = self.cells[l..r]
-                .iter()
-                .map(|cell| cell.possible_block_sizes.ones().next().unwrap_or(0))
+            let mut min = (l..r)
+                .map(|j| self.min_possible_size(j).unwrap_or(0))
                 .min()
                 .unwrap_or(0);
             while l > l_min && {
-                min.setmin(
-                    self.cells[l]
-                        .possible_block_sizes
-                        .ones()
-                        .next()
-                        .unwrap_or(0),
-                );
+                min.setmin(self.min_possible_size(l).unwrap_or(0));
                 min
             } > r - l
             {
@@ -388,10 +367,7 @@ impl Line {
                 continue;
             }
             let size = r - l;
-            if self.cells[l..r]
-                .iter()
-                .all(|cell| cell.possible_block_sizes.count_ones(0..size) == 0)
-            {
+            if (l..r).all(|j| self.min_possible_size(j).is_none_or(|m| m >= size)) {
                 self.set_range(l..r, State::Black, Operation::BlackIfBounded(l, r));
             }
         }
@@ -406,9 +382,7 @@ impl Line {
             }
             let size = r - l;
             for j in l..r {
-                if self.cells[j].possible_block_sizes.contains(size)
-                    && self.cells[j].possible_block_sizes.count_ones(size..self.n) == 1
-                {
+                if self.max_possible_size(j) == Some(size) {
                     if l > 0 {
                         self.set(l - 1, State::White, Operation::WhiteIfSegmentComplete(l, r));
                     }
@@ -448,14 +422,7 @@ impl Line {
             if r < self.n && self.cells[r].state != State::White {
                 continue;
             }
-            if (l..r).any(|j| {
-                self.cells[j]
-                    .possible_block_sizes
-                    .ones()
-                    .next()
-                    .unwrap_or(0)
-                    > r - l
-            }) {
+            if (l..r).any(|j| self.min_possible_size(j).unwrap_or(0) > r - l) {
                 self.set_range(l..r, State::White, Operation::WhiteIfTooShort(l, r));
             }
         }
