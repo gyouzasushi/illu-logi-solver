@@ -69,7 +69,6 @@ impl Segments {
     }
 }
 
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -144,5 +143,4 @@ mod test {
         };
         assert!(segment.exist[4..8].iter().all(|&x| x));
     }
-
 }
