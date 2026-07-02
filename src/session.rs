@@ -11,7 +11,7 @@
 //! （`Unconfirmed` への巻き戻しでセグメント情報が残留する／`solve` 消化後の
 //! 書き込みが伝播しない）は「発生し得ない設計」として解消される。
 
-use crate::{solver::validate_constraints, Hint, Solver, SolverError, State};
+use crate::{Hint, Solver, SolverError, State, solver::validate_constraints};
 
 /// `Session::set` 1回分の記録。`undo`/`rollback` の再生に使う。
 #[derive(Debug, Clone, Copy)]

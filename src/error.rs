@@ -46,7 +46,9 @@ impl LineError {
 
 #[derive(Debug, Error)]
 pub enum SolverError {
-    #[error("contradiction on {axis:?}[{i}][{j}]: attempt to set {new_state:?} by {by:?}, but {current_state:?} is already set.")]
+    #[error(
+        "contradiction on {axis:?}[{i}][{j}]: attempt to set {new_state:?} by {by:?}, but {current_state:?} is already set."
+    )]
     Contradiction {
         axis: Axis,
         i: usize,
@@ -57,7 +59,9 @@ pub enum SolverError {
     },
     #[error("could not find a solution: there might be multiple possible solutions.")]
     Indeterminate,
-    #[error("no valid placement for block {id} on {axis:?}[{i}]: it does not fit anywhere given the current cells.")]
+    #[error(
+        "no valid placement for block {id} on {axis:?}[{i}]: it does not fit anywhere given the current cells."
+    )]
     NoPlacement { axis: Axis, i: usize, id: usize },
     #[error("{axis:?}[{i}] contains a block of size 0, which is not a valid constraint.")]
     InvalidBlockSize { axis: Axis, i: usize },

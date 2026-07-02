@@ -377,10 +377,11 @@ fn test_hint() {
         hint.blocks.iter().map(|b| b.size).collect::<Vec<_>>(),
         *expected_sizes
     );
-    assert!(hint
-        .blocks
-        .iter()
-        .all(|b| b.possible_placement.start <= b.possible_placement.end));
+    assert!(
+        hint.blocks
+            .iter()
+            .all(|b| b.possible_placement.start <= b.possible_placement.end)
+    );
     solver.solve().unwrap();
     assert!(solver.hint().unwrap().is_none());
 }
@@ -442,9 +443,10 @@ fn test_session_bug2_set_after_exhausted_deduce_propagates() {
     let mut session = Session::new([vec![vec![1], vec![1]], vec![vec![1], vec![1]]]).unwrap();
     // 2通りの解があり確定しないが、deduce は部分盤面（全 Unconfirmed）を Ok で返す。
     let grid = session.deduce().unwrap();
-    assert!(grid
-        .iter()
-        .all(|row| row.iter().all(|&s| s == State::Unconfirmed)));
+    assert!(
+        grid.iter()
+            .all(|row| row.iter().all(|&s| s == State::Unconfirmed))
+    );
 
     session.set(0, 0, State::Black); // 正解の1つを教える
     let grid = session
