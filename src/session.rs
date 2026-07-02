@@ -78,11 +78,17 @@ impl Session {
     /// 現盤面から確定できる範囲まで推論し、結果の盤面を返す。
     ///
     /// 内部で新品のソルバに対して `solve` を走らせるだけで、`Session` の
-    /// 盤面・履歴は一切変更しない。一意に解けない場合は `solve` と同じく
-    /// `SolverError::Indeterminate` を返す。
+    /// 盤面・履歴は一切変更しない。一意に確定しきれない場合も、そこまでで
+    /// 確定した部分盤面を `Ok` で返す。全確定したかどうかは、返った盤面に
+    /// `State::Unconfirmed` が残っているかで判定できる。`Err` になるのは
+    /// 矛盾（`SolverError::Contradiction`）のみ。
     pub fn deduce(&self) -> Result<Vec<Vec<State>>, SolverError> {
         let mut solver = self.solver();
-        solver.solve()?;
+        match solver.solve() {
+            // Indeterminate でもソルバ内部には部分確定が残っているので読み出す。
+            Ok(()) | Err(SolverError::Indeterminate) => {}
+            Err(e @ SolverError::Contradiction { .. }) => return Err(e),
+        }
         let n = self.n();
         Ok((0..n)
             .map(|i| (0..n).map(|j| solver.state(i, j)).collect())
@@ -102,6 +108,13 @@ impl Session {
         }
     }
 
+    /// これまでの `set` の回数（＝現在の履歴件数）。
+    ///
+    /// [`Session::rollback`] に渡す `t` の基準になる。
+    pub fn turn(&self) -> usize {
+        self.history.len()
+    }
+
     /// 直近の `set` を1回取り消す。
     pub fn undo(&mut self) {
         self.history.pop();
@@ -110,7 +123,8 @@ impl Session {
 
     /// 履歴を先頭 `t` 件に切り詰め、盤面を再構築する。
     ///
-    /// `t` が現在の履歴件数以上なら何もしない（`Vec::truncate` と同じ挙動）。
+    /// 現在の履歴件数は [`Session::turn`] で取得できる。`t` がそれ以上なら
+    /// 何もしない（`Vec::truncate` と同じ挙動）。
     pub fn rollback(&mut self, t: usize) {
         self.history.truncate(t);
         self.rebuild_grid();

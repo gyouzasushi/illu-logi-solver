@@ -1,5 +1,34 @@
 use illu_logi_solver::*;
 
+fn constraints_for_10x10() -> [Vec<Vec<usize>>; 2] {
+    [
+        vec![
+            vec![5, 1],
+            vec![2, 3],
+            vec![2, 2, 1],
+            vec![3, 2, 2],
+            vec![1, 3, 1],
+            vec![2, 3],
+            vec![1, 3, 1],
+            vec![1, 1, 2, 2],
+            vec![1, 6, 1],
+            vec![5, 2],
+        ],
+        vec![
+            vec![1, 2, 2],
+            vec![7],
+            vec![2, 1, 1, 2],
+            vec![1, 1, 4],
+            vec![2, 1, 1, 2],
+            vec![9],
+            vec![3, 1, 3],
+            vec![3, 1],
+            vec![1, 1, 1, 1],
+            vec![2, 3],
+        ],
+    ]
+}
+
 #[test]
 fn test_no_solution() {
     let mut solver = Solver::new([
@@ -30,32 +59,7 @@ fn test_5x5() {
 }
 #[test]
 fn test_10x10() {
-    let mut solver = Solver::new([
-        vec![
-            vec![5, 1],
-            vec![2, 3],
-            vec![2, 2, 1],
-            vec![3, 2, 2],
-            vec![1, 3, 1],
-            vec![2, 3],
-            vec![1, 3, 1],
-            vec![1, 1, 2, 2],
-            vec![1, 6, 1],
-            vec![5, 2],
-        ],
-        vec![
-            vec![1, 2, 2],
-            vec![7],
-            vec![2, 1, 1, 2],
-            vec![1, 1, 4],
-            vec![2, 1, 1, 2],
-            vec![9],
-            vec![3, 1, 3],
-            vec![3, 1],
-            vec![1, 1, 1, 1],
-            vec![2, 3],
-        ],
-    ]);
+    let mut solver = Solver::new(constraints_for_10x10());
     assert!(solver.solve().is_ok());
     assert!(solver.judge());
 }
@@ -233,32 +237,7 @@ fn test_advance() {
     ]);
     while solver.advance().unwrap().is_some() {}
 
-    let mut solver = Solver::new([
-        vec![
-            vec![5, 1],
-            vec![2, 3],
-            vec![2, 2, 1],
-            vec![3, 2, 2],
-            vec![1, 3, 1],
-            vec![2, 3],
-            vec![1, 3, 1],
-            vec![1, 1, 2, 2],
-            vec![1, 6, 1],
-            vec![5, 2],
-        ],
-        vec![
-            vec![1, 2, 2],
-            vec![7],
-            vec![2, 1, 1, 2],
-            vec![1, 1, 4],
-            vec![2, 1, 1, 2],
-            vec![9],
-            vec![3, 1, 3],
-            vec![3, 1],
-            vec![1, 1, 1, 1],
-            vec![2, 3],
-        ],
-    ]);
+    let mut solver = Solver::new(constraints_for_10x10());
     while solver.advance().unwrap().is_some() {}
 }
 
@@ -278,38 +257,12 @@ fn test_hint() {
 
 #[test]
 fn test_session_rollback() {
-    let constraints = [
-        vec![
-            vec![5, 1],
-            vec![2, 3],
-            vec![2, 2, 1],
-            vec![3, 2, 2],
-            vec![1, 3, 1],
-            vec![2, 3],
-            vec![1, 3, 1],
-            vec![1, 1, 2, 2],
-            vec![1, 6, 1],
-            vec![5, 2],
-        ],
-        vec![
-            vec![1, 2, 2],
-            vec![7],
-            vec![2, 1, 1, 2],
-            vec![1, 1, 4],
-            vec![2, 1, 1, 2],
-            vec![9],
-            vec![3, 1, 3],
-            vec![3, 1],
-            vec![1, 1, 1, 1],
-            vec![2, 3],
-        ],
-    ];
     // 正解盤面から、矛盾なく置ける値を拾って set に使う。
     let mut solved = Solver::new(constraints_for_10x10());
     solved.solve().unwrap();
     let correct = |i: usize, j: usize| solved.state(i, j);
 
-    let mut session = Session::new(constraints);
+    let mut session = Session::new(constraints_for_10x10());
     session.set(0, 0, correct(0, 0));
     session.set(0, 1, correct(0, 1));
     session.set(1, 1, correct(1, 1));
@@ -328,35 +281,6 @@ fn test_session_rollback() {
             assert_eq!(cell, solved.state(i, j));
         }
     }
-}
-
-fn constraints_for_10x10() -> [Vec<Vec<usize>>; 2] {
-    [
-        vec![
-            vec![5, 1],
-            vec![2, 3],
-            vec![2, 2, 1],
-            vec![3, 2, 2],
-            vec![1, 3, 1],
-            vec![2, 3],
-            vec![1, 3, 1],
-            vec![1, 1, 2, 2],
-            vec![1, 6, 1],
-            vec![5, 2],
-        ],
-        vec![
-            vec![1, 2, 2],
-            vec![7],
-            vec![2, 1, 1, 2],
-            vec![1, 1, 4],
-            vec![2, 1, 1, 2],
-            vec![9],
-            vec![3, 1, 3],
-            vec![3, 1],
-            vec![1, 1, 1, 1],
-            vec![2, 3],
-        ],
-    ]
 }
 
 // REFACTORING_PLAN.md「確認済みバグ」Bug 1 の再現シナリオ:
@@ -386,7 +310,11 @@ fn test_session_bug1_unconfirmed_rollback_then_correct_placement_judges_true() {
 #[test]
 fn test_session_bug2_set_after_exhausted_deduce_propagates() {
     let mut session = Session::new([vec![vec![1], vec![1]], vec![vec![1], vec![1]]]);
-    assert!(matches!(session.deduce(), Err(SolverError::Indeterminate))); // 2通りの解があり未確定
+    // 2通りの解があり確定しないが、deduce は部分盤面（全 Unconfirmed）を Ok で返す。
+    let grid = session.deduce().unwrap();
+    assert!(grid
+        .iter()
+        .all(|row| row.iter().all(|&s| s == State::Unconfirmed)));
 
     session.set(0, 0, State::Black); // 正解の1つを教える
     let grid = session
