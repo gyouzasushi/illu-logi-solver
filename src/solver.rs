@@ -1,6 +1,6 @@
 use crate::{
     error::{Cause, SolverError},
-    line::{Line, State},
+    line::{HintBlock, Line, State},
     operation::Operation,
 };
 use std::{collections::VecDeque, ops::Range};
@@ -77,12 +77,22 @@ pub struct Action {
 }
 
 /// 確定の根拠ブロックまで含む、自己完結したヒント。
+///
+/// `action` に加えて、その `action` を算出したのと **同一のスナップショット**
+/// （`hint()` 内部で作る `Line` の clone）から読み出した行コンテキストを持つ。
+/// `possible_ids`/`blocks` はいずれもそのスナップショット由来なので、常に
+/// `action` と矛盾なく組み合わせて説明文を組み立てられる。人間向けの文言化
+/// （どのセルがなぜ塗られるかの説明文の組み立て）は `Session`/UI 層の仕事とし、
+/// ここでは行の生データだけを持つ（REFACTORING_PLAN.md D項）。
 #[derive(Debug, Clone)]
 pub struct Hint {
     pub action: Action,
     /// `action.range` と同じ並びで、各セルの候補ブロックID範囲。
     /// ヒント算出と同一スナップショット上で読み出すため、常に `action` と整合する。
     pub possible_ids: Vec<Range<usize>>,
+    /// `action.axis`/`action.i` が指す行の、全ブロックの配置可能範囲とサイズ。
+    /// `possible_ids` と同じスナップショットから読み出す。詳細は [`HintBlock`]。
+    pub blocks: Vec<HintBlock>,
 }
 
 /// 制約（＋任意で初期盤面）を受け取って推論するだけの、不変入力の推論エンジン。
@@ -226,7 +236,53 @@ impl Solver {
         Ok(None)
     }
 
+    /// 現盤面から、最も安い推論ステップ1件を非破壊で求める。
+    ///
+    /// # `advance` と併用したときの挙動（設計問題5）
+    ///
+    /// `advance` は1回の呼び出しにつき `Line` のキューから1件しか消化しない。
+    /// ところが1回の規則発火（`Line::STEPS` の1関数の実行）は複数件を
+    /// キューに積むことがあるため、`advance` を繰り返す過程で、まだ消化されて
+    /// いない「残留キュー」を持つ行が生まれ得る。この状態で `hint` を呼ぶと、
+    /// 以下の順で結果を決める:
+    ///
+    /// 1. **まず全行を走査し、残留キューを持つ行があれば、その中で最初に
+    ///    見つかった行の最も古い保留項目（`queue.front()`）を返す**。
+    ///    複数の行に残留があるときは `axis`（Row → Column）→ `i` 昇順で
+    ///    決める（`Line` は行ごとの到着順しか保持しないため、行をまたいだ
+    ///    真の時系列は追跡していない）。
+    /// 2. 残留が1件もなければ、通常どおり `Line::STEPS` を安い順に全行へ
+    ///    試し、最初に見つかった結果を返す（従来の挙動）。
+    ///
+    /// 残留を優先させないと、コストの高い規則が生成した残留項目と、
+    /// 別の行でこれから安い規則が見つける結果とが `Line` のFIFOキュー内で
+    /// 混ざり、「最も安いステップから返す」という保証が崩れる
+    /// （residual はすでに判明済みの推論なので、探索し直す前に返すのが自然）。
+    /// `Session` 経由（呼び出しのたびに新品の `Solver` を使い捨てる）では
+    /// `advance` を呼ばないため、この経路自体に入らない。
     pub fn hint(&self) -> Result<Option<Hint>, SolverError> {
+        for &axis in &[Axis::Row, Axis::Column] {
+            for i in 0..self.line_count(axis) {
+                let line = &self.lines[axis as usize][i];
+                if let Some((range, state, by)) = line.queue.front().cloned() {
+                    let possible_ids = range.clone().map(|j| line.possible_id(j)).collect();
+                    let blocks = line.hint_blocks();
+                    let action = Action {
+                        axis,
+                        i,
+                        range,
+                        state: state.into(),
+                        by,
+                    };
+                    return Ok(Some(Hint {
+                        action,
+                        possible_ids,
+                        blocks,
+                    }));
+                }
+            }
+        }
+
         for step_idx in 0..Line::STEPS.len() {
             for &axis in &[Axis::Row, Axis::Column] {
                 for i in 0..self.line_count(axis) {
@@ -238,6 +294,7 @@ impl Solver {
                         // ヒント算出に使った同じスナップショット（この clone）から候補IDを読み出す。
                         // 別呼び出し・別スナップショットを挟まないため、常に action と整合する。
                         let possible_ids = range.clone().map(|j| line.possible_id(j)).collect();
+                        let blocks = line.hint_blocks();
                         let action = Action {
                             axis,
                             i,
@@ -248,6 +305,7 @@ impl Solver {
                         return Ok(Some(Hint {
                             action,
                             possible_ids,
+                            blocks,
                         }));
                     }
                 }
@@ -376,5 +434,107 @@ impl std::fmt::Display for Solver {
             writeln!(f, "{line}")?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 設計問題5の再現・回帰テスト（REFACTORING_PLAN.md）: 1回の規則発火
+    // （`Line::STEPS` の1関数）が複数件をキューに積む一方、`advance` は
+    // 1件しか消化しない。よって `advance` を繰り返すと、消化されない
+    // 残留キューを持つ行が生まれ得る。この状態で `hint` を呼んだとき、
+    // STEPS を安い順に探索し直すのではなく、既に判明している残留を
+    // 優先して返すことを検証する（`hint` のdocコメント参照）。
+    #[test]
+    fn hint_prioritizes_residual_queue_over_step_search() {
+        let mut solver = Solver::new([
+            vec![
+                vec![2, 4, 5],
+                vec![4, 1, 1],
+                vec![3, 3, 1],
+                vec![8, 1],
+                vec![1, 3, 1, 5],
+                vec![2, 2, 4],
+                vec![1, 1, 1, 2, 1, 2],
+                vec![1, 7, 2],
+                vec![1, 1, 3],
+                vec![5, 1, 2, 1, 1],
+                vec![3, 4, 1],
+                vec![1, 1, 1, 1, 1],
+                vec![2, 6],
+                vec![10, 1],
+                vec![7, 2],
+            ],
+            vec![
+                vec![1, 3, 2, 1],
+                vec![1, 2, 1, 3, 2],
+                vec![3, 2, 2, 2],
+                vec![4, 1, 4],
+                vec![2, 4, 1, 3],
+                vec![2, 1, 2, 1, 2],
+                vec![2, 1, 2, 2, 2],
+                vec![4, 2, 1, 1],
+                vec![3, 4, 2],
+                vec![1, 1, 1, 1, 3],
+                vec![1, 4, 3],
+                vec![2, 3, 3, 1],
+                vec![1, 1, 3, 1, 2],
+                vec![1, 1, 3, 1],
+                vec![2, 1, 1, 5],
+            ],
+        ])
+        .unwrap();
+
+        // hint() 自身と同じ順序（Row→Column, iは昇順）で「先頭に何か
+        // 残っている行」を探す。hint() はこれと同じものを返すはず。
+        let find_earliest_residual = |solver: &Solver| {
+            [Axis::Row, Axis::Column].iter().find_map(|&axis| {
+                (0..solver.line_count(axis))
+                    .find(|&i| !solver.lines[axis as usize][i].queue.is_empty())
+                    .map(|i| (axis, i))
+            })
+        };
+
+        let mut checked = false;
+        let mut saw_multi_item_push = false;
+        while solver.advance().unwrap().is_some() {
+            // 1回の規則発火が複数件を積むケースが本当に起きていることの確認
+            // （起きていなければ、このテストは設計問題5の状況を再現できていない）。
+            saw_multi_item_push |= [Axis::Row, Axis::Column].iter().any(|&axis| {
+                (0..solver.line_count(axis)).any(|i| solver.lines[axis as usize][i].queue.len() > 1)
+            });
+
+            let Some((axis, i)) = find_earliest_residual(&solver) else {
+                continue;
+            };
+            // このLineの実際のキュー先頭（＝既に判明している最も古い保留推論）。
+            let expected = solver.lines[axis as usize][i]
+                .queue
+                .front()
+                .cloned()
+                .unwrap();
+            let hint = solver
+                .hint()
+                .unwrap()
+                .expect("残留キューが存在するので hint は必ず何かを返す");
+            assert_eq!(hint.action.axis, axis);
+            assert_eq!(hint.action.i, i);
+            assert_eq!(hint.action.range, expected.0);
+            assert_eq!(hint.action.state, expected.1.into());
+            assert_eq!(hint.action.by, expected.2);
+            checked = true;
+            if saw_multi_item_push {
+                break;
+            }
+        }
+        assert!(checked, "残留キューが一度も生まれなかった");
+        assert!(
+            saw_multi_item_push,
+            "この15x15フィクスチャなら advance() の初期段階で残留キュー（1回の規則発火が\
+             複数件を積むケース）が生まれるはず。生まれなくなった場合はテストの前提\
+             （フィクスチャ）を見直すこと。"
+        );
     }
 }

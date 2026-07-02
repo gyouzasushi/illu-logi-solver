@@ -44,6 +44,19 @@ struct Block {
     possible_placement: Range<usize>,
 }
 
+/// ヒント算出と同一スナップショットにおける、1ブロックの配置可能範囲とサイズ。
+///
+/// [`crate::Hint::possible_ids`] と同じく、[`crate::Solver::hint`] が読み出した
+/// スナップショット（`Line` の clone）から作られるため、常に同じ呼び出しの
+/// `action` と整合する。例えば `WhiteIfNoBlockCovers` が「ブロック#1は
+/// 左からここまで、#2はここから先」を主張しているとき、その根拠は
+/// `blocks[1].possible_placement` / `blocks[2].possible_placement` から読み取れる。
+#[derive(Debug, Clone)]
+pub struct HintBlock {
+    pub size: usize,
+    pub possible_placement: Range<usize>,
+}
+
 #[derive(Clone)]
 pub(crate) struct Line {
     n: usize,
@@ -83,6 +96,18 @@ impl Line {
     }
     pub(crate) fn possible_id(&self, j: usize) -> Range<usize> {
         self.cells[j].possible_block_ids.clone()
+    }
+    /// 現在のスナップショットにおける全ブロックの配置可能範囲とサイズ。
+    /// [`Solver::hint`](crate::Solver::hint) が action と同一の clone から
+    /// 呼ぶことで整合性を保つ（[`HintBlock`] のdocコメント参照）。
+    pub(crate) fn hint_blocks(&self) -> Vec<HintBlock> {
+        self.blocks
+            .iter()
+            .map(|block| HintBlock {
+                size: block.size,
+                possible_placement: block.possible_placement.clone(),
+            })
+            .collect()
     }
     // セル `j` の候補ブロックID範囲に含まれるブロックのうち、最小/最大のサイズ。
     // ブロック数は小さいので素朴に走査する。候補が空集合なら None。

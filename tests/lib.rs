@@ -361,15 +361,26 @@ fn test_advance() {
 
 #[test]
 fn test_hint() {
-    let mut solver = Solver::new([
+    let constraints = [
         vec![vec![2, 1], vec![3], vec![2, 2], vec![1, 2], vec![1, 1]],
         vec![vec![3, 1], vec![4], vec![1, 1], vec![2], vec![1, 2]],
-    ])
-    .unwrap();
+    ];
+    let mut solver = Solver::new(constraints.clone()).unwrap();
     let hint = solver.hint().unwrap().expect("a hint should be available");
     // possible_ids は action.range と同じ並び・同じ長さで、各セルの候補ブロックが揃う。
     assert_eq!(hint.possible_ids.len(), hint.action.range.len());
     assert!(hint.possible_ids.iter().all(|ids| !ids.is_empty()));
+    // blocks は action.axis/i が指す行の制約と同じ本数・同じサイズ列で揃っている。
+    let axis_idx = if hint.action.axis == Axis::Row { 0 } else { 1 };
+    let expected_sizes = &constraints[axis_idx][hint.action.i];
+    assert_eq!(
+        hint.blocks.iter().map(|b| b.size).collect::<Vec<_>>(),
+        *expected_sizes
+    );
+    assert!(hint
+        .blocks
+        .iter()
+        .all(|b| b.possible_placement.start <= b.possible_placement.end));
     solver.solve().unwrap();
     assert!(solver.hint().unwrap().is_none());
 }
