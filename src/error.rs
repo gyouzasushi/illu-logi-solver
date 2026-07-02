@@ -1,9 +1,13 @@
-use crate::{line::State, operation::Operation, solver::Axis};
+use crate::{
+    line::{Determined, State},
+    operation::Operation,
+    solver::Axis,
+};
 use thiserror::Error;
 
 #[derive(Debug)]
 pub(crate) enum LineError {
-    Contradiction(usize, State, State, Operation),
+    Contradiction(usize, State, Determined, Operation),
 }
 impl LineError {
     pub(crate) fn to_solver_error(&self, axis: Axis, i: usize) -> SolverError {
@@ -14,7 +18,7 @@ impl LineError {
                     i,
                     j: *j,
                     current_state: *current_state,
-                    new_state: *new_state,
+                    new_state: State::from(*new_state),
                     by: *by,
                 }
             }

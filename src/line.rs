@@ -12,6 +12,26 @@ pub enum State {
     Black,
 }
 
+/// 推論が書き込める値。白か黒のみで、`Unconfirmed` を表現できない。
+///
+/// `Line` のキューと `update`/`set`/`set_range` はこの型を扱うことで、
+/// 「推論結果として `Unconfirmed` を書き込む」という本来あり得ない経路を
+/// 型レベルで排除する（`State` のままだと `update` に `Unconfirmed` を
+/// 渡すコードが書けてしまい、実行時に矛盾扱いされるまで気付けなかった）。
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum Determined {
+    White,
+    Black,
+}
+impl From<Determined> for State {
+    fn from(determined: Determined) -> Self {
+        match determined {
+            Determined::White => State::White,
+            Determined::Black => State::Black,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq)]
 pub(crate) struct Cell {
     pub(crate) state: State,
@@ -33,7 +53,7 @@ pub(crate) struct Line {
     segments_non_white: Segments,
     segments_unconfirmed: Segments,
     next_step: usize,
-    pub(crate) queue: VecDeque<(Range<usize>, State, Operation)>,
+    pub(crate) queue: VecDeque<(Range<usize>, Determined, Operation)>,
 }
 
 impl Line {
@@ -72,14 +92,17 @@ impl Line {
     fn max_possible_size(&self, j: usize) -> Option<usize> {
         self.possible_id(j).map(|id| self.blocks[id].size).max()
     }
-    fn set(&mut self, j: usize, state: State, by: Operation) {
+    fn set(&mut self, j: usize, state: Determined, by: Operation) {
         self.set_range(j..j + 1, state, by)
     }
-    fn set_range(&mut self, range: Range<usize>, state: State, by: Operation) {
+    fn set_range(&mut self, range: Range<usize>, state: Determined, by: Operation) {
         if range.is_empty() {
             return;
         }
-        if range.clone().all(|j| self.cells[j].state == state) {
+        if range
+            .clone()
+            .all(|j| self.cells[j].state == State::from(state))
+        {
             return;
         }
         self.queue.push_back((range, state, by));
@@ -101,18 +124,17 @@ impl Line {
     pub(crate) fn update(
         &mut self,
         range: Range<usize>,
-        state: State,
+        state: Determined,
         by: Operation,
     ) -> Result<(), LineError> {
         for j in range {
             match (self.cells[j].state, state) {
-                (State::White, State::Unconfirmed | State::Black)
-                | (State::Black, State::Unconfirmed | State::White) => {
+                (State::White, Determined::Black) | (State::Black, Determined::White) => {
                     return Err(LineError::Contradiction(j, self.cells[j].state, state, by));
                 }
                 _ => (),
             };
-            self.set_state(j, state);
+            self.set_state(j, state.into());
         }
         self.update_possible_id()?;
         Ok(())
@@ -144,7 +166,7 @@ impl Line {
     }
     pub(crate) fn advance(
         &mut self,
-    ) -> Result<Option<(Range<usize>, State, Operation)>, LineError> {
+    ) -> Result<Option<(Range<usize>, Determined, Operation)>, LineError> {
         self.next_step = 0;
         self.update_possible_id()?;
         while !self.has_update() {
@@ -284,7 +306,7 @@ impl Line {
                 return Err(LineError::Contradiction(
                     j,
                     self.cells[j].state,
-                    State::Black,
+                    Determined::Black,
                     Operation::BlackIfOverlap(start, start + self.blocks[id].size),
                 ));
             }
@@ -302,7 +324,7 @@ impl Line {
                 continue;
             }
             let (l, r) = (r - self.blocks[id].size, l + self.blocks[id].size);
-            self.set_range(l..r, State::Black, Operation::BlackIfOverlap(l, r));
+            self.set_range(l..r, Determined::Black, Operation::BlackIfOverlap(l, r));
         }
     }
     // どのブロックにも属せないセルは白
@@ -315,7 +337,11 @@ impl Line {
             let r = (l..self.n)
                 .find(|&j| !self.possible_id(j).is_empty())
                 .unwrap_or(self.n);
-            self.set_range(l..r, State::White, Operation::WhiteIfNoBlockCovers(l, r));
+            self.set_range(
+                l..r,
+                Determined::White,
+                Operation::WhiteIfNoBlockCovers(l, r),
+            );
             l = r;
         }
     }
@@ -336,7 +362,7 @@ impl Line {
             {
                 r += 1;
             }
-            self.set_range(j..r, State::Black, Operation::BlackIfLeftBounded(l, r));
+            self.set_range(j..r, Determined::Black, Operation::BlackIfLeftBounded(l, r));
         }
     }
     // 非白領域の右端が確定しているとき、最小ブロックサイズ分だけ左へ黒を延ばせる
@@ -357,7 +383,11 @@ impl Line {
             {
                 l -= 1;
             }
-            self.set_range(l..j, State::Black, Operation::BlackIfRightBounded(l, r));
+            self.set_range(
+                l..j,
+                Determined::Black,
+                Operation::BlackIfRightBounded(l, r),
+            );
         }
     }
     // 両端が確定した非白領域で全セルの可能ブロックサイズが領域長以上なら全体が黒
@@ -368,7 +398,7 @@ impl Line {
             }
             let size = r - l;
             if (l..r).all(|j| self.min_possible_size(j).is_none_or(|m| m >= size)) {
-                self.set_range(l..r, State::Black, Operation::BlackIfBounded(l, r));
+                self.set_range(l..r, Determined::Black, Operation::BlackIfBounded(l, r));
             }
         }
     }
@@ -384,10 +414,18 @@ impl Line {
             for j in l..r {
                 if self.max_possible_size(j) == Some(size) {
                     if l > 0 {
-                        self.set(l - 1, State::White, Operation::WhiteIfSegmentComplete(l, r));
+                        self.set(
+                            l - 1,
+                            Determined::White,
+                            Operation::WhiteIfSegmentComplete(l, r),
+                        );
                     }
                     if r < self.n {
-                        self.set(r, State::White, Operation::WhiteIfSegmentComplete(l, r));
+                        self.set(
+                            r,
+                            Determined::White,
+                            Operation::WhiteIfSegmentComplete(l, r),
+                        );
                     }
                     break;
                 }
@@ -409,7 +447,7 @@ impl Line {
                 size += self.segments_black.size(j + 1);
             }
             if size > self.blocks[id].size {
-                self.set(j, State::White, Operation::WhiteIfTooLong(j));
+                self.set(j, Determined::White, Operation::WhiteIfTooLong(j));
             }
         }
     }
@@ -423,7 +461,7 @@ impl Line {
                 continue;
             }
             if (l..r).any(|j| self.min_possible_size(j).unwrap_or(0) > r - l) {
-                self.set_range(l..r, State::White, Operation::WhiteIfTooShort(l, r));
+                self.set_range(l..r, Determined::White, Operation::WhiteIfTooShort(l, r));
             }
         }
     }

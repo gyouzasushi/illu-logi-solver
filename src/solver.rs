@@ -211,7 +211,7 @@ impl Solver {
                     axis,
                     i,
                     range,
-                    state,
+                    state: state.into(),
                     by,
                 }));
             } else {
@@ -237,7 +237,7 @@ impl Solver {
                             axis,
                             i,
                             range,
-                            state,
+                            state: state.into(),
                             by,
                         };
                         return Ok(Some(Hint {
