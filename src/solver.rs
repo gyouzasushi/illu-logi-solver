@@ -108,6 +108,13 @@ pub struct Solver {
     constraints: [Vec<Vec<usize>>; 2],
     lines: [Vec<Line>; 2],
     queue: VecDeque<(Axis, usize)>,
+    /// `(axis, i)` が現在 `queue` に入っているかどうか（設計問題6）。
+    /// `advance` は処理済みの行から複数の直交行へ伝播するたびに
+    /// `push_front((axis.orthogonal(), j))` するが、同じ `(axis, j)` が
+    /// まだキューに残っている間に何度も積むと無駄な再走査が増える。
+    /// この重複投入を防ぐためのフラグ。`queue` に積むときに立て、
+    /// その行が完全に消化されて `pop_front` されるときに下ろす。
+    in_queue: [Vec<bool>; 2],
     turn_count: usize,
 }
 impl Solver {
@@ -143,12 +150,15 @@ impl Solver {
                 (0..count).map(move |i| (axis, i))
             })
             .collect();
+        // 初期状態では全 (axis, i) がちょうど1回ずつ queue に入っている。
+        let in_queue = [vec![true; height], vec![true; width]];
         Ok(Self {
             height,
             width,
             constraints,
             lines,
             queue,
+            in_queue,
             turn_count: 0,
         })
     }
@@ -216,10 +226,18 @@ impl Solver {
                     // axis.orthogonal() 上の行 j なので、失敗時の報告も
                     // (axis.orthogonal(), j) を使う。伝播の発生源
                     // (axis, i) は Cause::Propagation のペイロードとして残す。
-                    self.lines[axis.orthogonal() as usize][j]
+                    let orthogonal = axis.orthogonal();
+                    self.lines[orthogonal as usize][j]
                         .update(i..i + 1, state, Cause::Propagation { axis, i })
-                        .map_err(|err| err.to_solver_error(axis.orthogonal(), j))?;
-                    self.queue.push_front((axis.orthogonal(), j));
+                        .map_err(|err| err.to_solver_error(orthogonal, j))?;
+                    // 設計問題6: 同じ (orthogonal, j) がまだキューに残っている間は
+                    // 積み直さない（dedup）。無駄な再走査を避けるだけで、
+                    // 積むかどうかに関わらず上の update はキューの有無と独立に
+                    // 必ず実行する必要がある（cell の状態自体は毎回反映すべきため）。
+                    if !self.in_queue[orthogonal as usize][j] {
+                        self.in_queue[orthogonal as usize][j] = true;
+                        self.queue.push_front((orthogonal, j));
+                    }
                 }
                 self.turn_count += 1;
                 return Ok(Some(Action {
@@ -231,6 +249,7 @@ impl Solver {
                 }));
             } else {
                 self.queue.pop_front().unwrap();
+                self.in_queue[axis as usize][i] = false;
             }
         }
         Ok(None)
@@ -335,8 +354,16 @@ impl Solver {
         true
     }
 
+    /// セル `(i, j)` の現在の状態。
+    ///
+    /// 行の `Line` と列の `Line` は同じセルを独立に持っているため、内部
+    /// 不変条件として両者は常に一致するはずである（設計問題7）。ただし
+    /// これはあくまで自己診断であり、呼び出し側の入力ミスでは起こり得ない
+    /// 種類のバグ（ソルバ内部の実装ミス）でしか崩れない。素の `getter` を
+    /// リリースビルドで panic させたくないため `debug_assert_eq!` にとどめ、
+    /// 不一致時はリリースビルドでは行側を正としてそのまま返す。
     pub fn state(&self, i: usize, j: usize) -> State {
-        assert_eq!(
+        debug_assert_eq!(
             self.lines[Axis::Row as usize][i].cells[j].state,
             self.lines[Axis::Column as usize][j].cells[i].state
         );
