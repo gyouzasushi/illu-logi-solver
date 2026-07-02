@@ -83,12 +83,10 @@ fn test_invalid_constraints_are_rejected() {
     // (3 + 1 + 1 = 5 <= 5行分の線長)。
     assert!(Solver::new([vec![vec![3, 1]; 5], vec![vec![]; 5]]).is_ok());
 
-    // rows と cols の本数が食い違う場合は拒否される。
-    let result = Solver::new([vec![vec![1]], vec![vec![1]; 2]]);
-    assert!(matches!(
-        result,
-        Err(SolverError::ConstraintAxisLengthMismatch { rows: 1, cols: 2 })
-    ));
+    // rows と cols の本数が食い違っても長方形として受け入れられる
+    // （高さ・幅が独立であることの確認。詳細な健全性は
+    // tests/soundness.rs の長方形テストで検証する）。
+    assert!(Solver::new([vec![vec![1]], vec![vec![1]; 2]]).is_ok());
 
     // Session::new も同じ検証を行う。
     assert!(matches!(

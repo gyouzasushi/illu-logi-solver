@@ -45,10 +45,6 @@ pub enum SolverError {
         i: usize,
         line_len: usize,
     },
-    #[error(
-        "constraints[Row] has {rows} entries but constraints[Column] has {cols}: the board must be square for now."
-    )]
-    ConstraintAxisLengthMismatch { rows: usize, cols: usize },
     #[error("grid has {actual} rows but constraints expect {expected} rows.")]
     GridHeightMismatch { expected: usize, actual: usize },
     #[error("grid row {i} has {actual} cells but constraints expect {expected}.")]

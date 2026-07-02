@@ -32,13 +32,14 @@ pub struct Session {
 }
 
 impl Session {
-    /// 制約から空盤面のセッションを作る（現状は正方形前提）。
+    /// 制約から空盤面のセッションを作る。高さ・幅は独立でよい
+    /// （`height = constraints[Row].len()`, `width = constraints[Column].len()`）。
     ///
     /// `Solver::new` と同じ検証（ブロックサイズ 0 の拒否、
-    /// `sum(blocks) + (blocks.len() - 1) <= n` ）を行う。
+    /// `sum(blocks) + (blocks.len() - 1) <= 線長` ）を行う。
     pub fn new(constraints: [Vec<Vec<usize>>; 2]) -> Result<Self, SolverError> {
-        let n = validate_constraints(&constraints)?;
-        let grid = vec![vec![State::Unconfirmed; n]; n];
+        let (height, width) = validate_constraints(&constraints)?;
+        let grid = vec![vec![State::Unconfirmed; width]; height];
         Ok(Self {
             constraints,
             grid,
@@ -46,8 +47,12 @@ impl Session {
         })
     }
 
-    fn n(&self) -> usize {
-        self.grid.len()
+    fn height(&self) -> usize {
+        self.constraints[0].len()
+    }
+
+    fn width(&self) -> usize {
+        self.constraints[1].len()
     }
 
     /// 盤面 `(i, j)` を `state` に書き換え、履歴に記録する。
@@ -98,9 +103,9 @@ impl Session {
             Ok(()) | Err(SolverError::Indeterminate) => {}
             Err(e) => return Err(e),
         }
-        let n = self.n();
-        Ok((0..n)
-            .map(|i| (0..n).map(|j| solver.state(i, j)).collect())
+        let (height, width) = (self.height(), self.width());
+        Ok((0..height)
+            .map(|i| (0..width).map(|j| solver.state(i, j)).collect())
             .collect())
     }
 
@@ -110,8 +115,8 @@ impl Session {
     }
 
     fn rebuild_grid(&mut self) {
-        let n = self.n();
-        self.grid = vec![vec![State::Unconfirmed; n]; n];
+        let (height, width) = (self.height(), self.width());
+        self.grid = vec![vec![State::Unconfirmed; width]; height];
         for edit in &self.history {
             self.grid[edit.i][edit.j] = edit.state;
         }

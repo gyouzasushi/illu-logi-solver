@@ -27,26 +27,28 @@ impl From<Axis> for usize {
     }
 }
 
-/// 制約を検証し、盤面の1辺の長さ `n`（現状は正方形前提）を返す。
+/// 制約を検証し、盤面の高さ・幅 `(height, width)` を返す。
+///
+/// 高さは行の本数（`constraints[Row].len()`）、幅は列の本数
+/// （`constraints[Column].len()`）で、両者が一致する必要はない
+/// （長方形の盤面を許容する）。行の `Line` は幅、列の `Line` は高さを
+/// 自分の線長として持つ。
 ///
 /// 検証内容: 各行・各列の制約についてブロックサイズ 0 を拒否し、
-/// `sum(blocks) + (blocks.len() - 1) <= n` を要求する。
+/// 行なら `sum(blocks) + (blocks.len() - 1) <= width`、
+/// 列なら同様に `<= height` を要求する。
 pub(crate) fn validate_constraints(
     constraints: &[Vec<Vec<usize>>; 2],
-) -> Result<usize, SolverError> {
-    if constraints[0].len() != constraints[1].len() {
-        return Err(SolverError::ConstraintAxisLengthMismatch {
-            rows: constraints[0].len(),
-            cols: constraints[1].len(),
-        });
+) -> Result<(usize, usize), SolverError> {
+    let height = constraints[Axis::Row as usize].len();
+    let width = constraints[Axis::Column as usize].len();
+    for (i, blocks) in constraints[Axis::Row as usize].iter().enumerate() {
+        validate_line_constraint(Axis::Row, i, blocks, width)?;
     }
-    let n = constraints[0].len();
-    for &axis in &[Axis::Row, Axis::Column] {
-        for (i, blocks) in constraints[axis as usize].iter().enumerate() {
-            validate_line_constraint(axis, i, blocks, n)?;
-        }
+    for (i, blocks) in constraints[Axis::Column as usize].iter().enumerate() {
+        validate_line_constraint(Axis::Column, i, blocks, height)?;
     }
-    Ok(n)
+    Ok((height, width))
 }
 
 fn validate_line_constraint(
@@ -91,36 +93,49 @@ pub struct Hint {
 /// 受けるような対話的な用途には、この `Solver` を毎回使い捨てで組み立てる
 /// 薄い層である [`crate::Session`] を使うこと。
 pub struct Solver {
-    n: usize,
+    height: usize,
+    width: usize,
     constraints: [Vec<Vec<usize>>; 2],
     lines: [Vec<Line>; 2],
     queue: VecDeque<(Axis, usize)>,
     turn_count: usize,
 }
 impl Solver {
+    /// `axis` 方向の `Line` の本数。行なら高さ、列なら幅。
+    fn line_count(&self, axis: Axis) -> usize {
+        match axis {
+            Axis::Row => self.height,
+            Axis::Column => self.width,
+        }
+    }
+
     /// 制約からソルバを構築する。
     ///
     /// 入力検証: 各行・列の制約についてブロックサイズ 0 を拒否し、
     /// `sum(blocks) + (blocks.len() - 1) <= 線長` を要求する
     /// （満たさない制約はどう埋めても盤面に収まらない）。
     pub fn new(constraints: [Vec<Vec<usize>>; 2]) -> Result<Self, SolverError> {
-        let n = validate_constraints(&constraints)?;
+        let (height, width) = validate_constraints(&constraints)?;
         let lines = [
-            constraints[0]
+            constraints[Axis::Row as usize]
                 .iter()
-                .map(|constraint| Line::new(n, constraint.clone()))
+                .map(|constraint| Line::new(width, constraint.clone()))
                 .collect(),
-            constraints[1]
+            constraints[Axis::Column as usize]
                 .iter()
-                .map(|constraint| Line::new(n, constraint.clone()))
+                .map(|constraint| Line::new(height, constraint.clone()))
                 .collect(),
         ];
         let queue = [Axis::Row, Axis::Column]
             .iter()
-            .flat_map(|&axis| (0..n).map(move |i| (axis, i)))
+            .flat_map(|&axis| {
+                let count = if axis == Axis::Row { height } else { width };
+                (0..count).map(move |i| (axis, i))
+            })
             .collect();
         Ok(Self {
-            n,
+            height,
+            width,
             constraints,
             lines,
             queue,
@@ -134,23 +149,23 @@ impl Solver {
     /// 新品の `Line` に前進方向で流し込むだけなので `possible_block_ids` の
     /// 単調性は壊れない。矛盾検出はここでは行わず、後続の `solve`/`advance`/
     /// `hint` に委ねる。制約の検証に加え、`grid` の次元が制約の次元
-    /// （`n` 行 × `n` 列）と一致することも検証する。
+    /// （`height` 行 × `width` 列）と一致することも検証する。
     pub fn with_grid(
         constraints: [Vec<Vec<usize>>; 2],
         grid: &[Vec<State>],
     ) -> Result<Self, SolverError> {
         let mut solver = Self::new(constraints)?;
-        if grid.len() != solver.n {
+        if grid.len() != solver.height {
             return Err(SolverError::GridHeightMismatch {
-                expected: solver.n,
+                expected: solver.height,
                 actual: grid.len(),
             });
         }
         for (i, row) in grid.iter().enumerate() {
-            if row.len() != solver.n {
+            if row.len() != solver.width {
                 return Err(SolverError::GridWidthMismatch {
                     i,
-                    expected: solver.n,
+                    expected: solver.width,
                     actual: row.len(),
                 });
             }
@@ -168,7 +183,7 @@ impl Solver {
 
     pub fn solve(&mut self) -> Result<(), SolverError> {
         while self.advance()?.is_some() {}
-        if self.lines[0]
+        if self.lines[Axis::Row as usize]
             .iter()
             .flat_map(|line| line.cells.iter().map(|cell| cell.state))
             .any(|state| matches!(state, State::Unconfirmed))
@@ -209,7 +224,7 @@ impl Solver {
     pub fn hint(&self) -> Result<Option<Hint>, SolverError> {
         for step_idx in 0..Line::STEPS.len() {
             for &axis in &[Axis::Row, Axis::Column] {
-                for i in 0..self.n {
+                for i in 0..self.line_count(axis) {
                     let mut line = self.lines[axis as usize][i].clone();
                     line.update_possible_id()
                         .map_err(|e| e.to_solver_error(axis, i))?;
@@ -241,24 +256,17 @@ impl Solver {
     }
 
     pub fn judge(&self) -> bool {
-        for i in 0..self.n {
-            let v = self.lines[Axis::Row as usize][i]
-                .segments_black
-                .segments()
-                .iter()
-                .map(|(l, r)| r - l)
-                .collect::<Vec<_>>();
-            if v != self.constraints[Axis::Row as usize][i] {
-                return false;
-            }
-            let v = self.lines[Axis::Column as usize][i]
-                .segments_black
-                .segments()
-                .iter()
-                .map(|(l, r)| r - l)
-                .collect::<Vec<_>>();
-            if v != self.constraints[Axis::Column as usize][i] {
-                return false;
+        for &axis in &[Axis::Row, Axis::Column] {
+            for i in 0..self.line_count(axis) {
+                let v = self.lines[axis as usize][i]
+                    .segments_black
+                    .segments()
+                    .iter()
+                    .map(|(l, r)| r - l)
+                    .collect::<Vec<_>>();
+                if v != self.constraints[axis as usize][i] {
+                    return false;
+                }
             }
         }
         true
@@ -275,23 +283,23 @@ impl Solver {
 
 impl std::fmt::Display for Solver {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for y in 0..self.n {
+        for y in 0..self.height {
             if y > 0 && y % 5 == 0 {
-                for x in 0..self.n {
+                for x in 0..self.width {
                     if x > 0 && x % 5 == 0 {
                         write!(f, " ")?;
                     }
                     write!(f, "-")?;
                 }
                 write!(f, "  ")?;
-                for x in 0..self.n {
+                for x in 0..self.width {
                     if x > 0 && x % 5 == 0 {
                         write!(f, " ")?;
                     }
                     write!(f, "-")?;
                 }
                 write!(f, "  ")?;
-                for x in 0..self.n {
+                for x in 0..self.width {
                     if x > 0 && x % 5 == 0 {
                         write!(f, " ")?;
                     }
@@ -299,7 +307,7 @@ impl std::fmt::Display for Solver {
                 }
                 writeln!(f)?;
             }
-            for x in 0..self.n {
+            for x in 0..self.width {
                 if x > 0 && x % 5 == 0 {
                     write!(f, "|")?;
                 }
@@ -314,7 +322,7 @@ impl std::fmt::Display for Solver {
                 )?
             }
             write!(f, "  ")?;
-            for x in 0..self.n {
+            for x in 0..self.width {
                 if x > 0 && x % 5 == 0 {
                     write!(f, "|")?;
                 }
@@ -335,7 +343,7 @@ impl std::fmt::Display for Solver {
                 )?
             }
             write!(f, "  ")?;
-            for x in 0..self.n {
+            for x in 0..self.width {
                 if x > 0 && x % 5 == 0 {
                     write!(f, "|")?;
                 }
