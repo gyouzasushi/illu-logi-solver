@@ -672,10 +672,18 @@ impl Solver {
                     if let Some((range, state, by)) = line.queue.pop_front() {
                         // ヒント算出に使った同じスナップショット（この clone）から候補IDを読み出す。
                         // 別呼び出し・別スナップショットを挟まないため、常に action と整合する。
-                        let possible_ids =
-                            range.clone().map(|j| line.possible_id(j)).collect();
-                        let action = Action { axis, i, range, state, by };
-                        return Ok(Some(Hint { action, possible_ids }));
+                        let possible_ids = range.clone().map(|j| line.possible_id(j)).collect();
+                        let action = Action {
+                            axis,
+                            i,
+                            range,
+                            state,
+                            by,
+                        };
+                        return Ok(Some(Hint {
+                            action,
+                            possible_ids,
+                        }));
                     }
                 }
             }
