@@ -226,6 +226,9 @@ impl Line {
         }
         Ok(())
     }
+    // 各ループは `id` を `self.blocks[id]` と `min_starts[id]`/`max_ends[id]` の
+    // 両方の添字に使っており、`enumerate()`化すると可読性が落ちるため許容する。
+    #[allow(clippy::needless_range_loop)]
     fn update_possible_id(&mut self) -> Result<(), LineError> {
         let n = self.n;
         let num_blocks = self.blocks.len();

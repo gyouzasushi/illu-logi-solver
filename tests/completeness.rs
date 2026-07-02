@@ -13,11 +13,11 @@ use illu_logi_solver::*;
 // 現在の states と制約に整合する全配置を列挙し、
 // (黒になり得るマスク, 白になり得るマスク) を返す。整合配置ゼロなら None。
 fn line_masks(states: &[State], blocks: &[usize]) -> Option<(u64, u64)> {
-    let n = states.len();
     let mut can_black = 0u64;
     let mut can_white = 0u64;
     let mut found = false;
     // rec(i, k, mask): セル i 以降にブロック k 以降を配置
+    #[allow(clippy::too_many_arguments)]
     fn rec(
         i: usize,
         k: usize,
@@ -77,6 +77,8 @@ fn line_masks(states: &[State], blocks: &[usize]) -> Option<(u64, u64)> {
 }
 
 // 完全な行推論の不動点。全確定なら Some(true)、途中で止まれば Some(false)、矛盾は None。
+// axis/j は grid[i][j] と grid[j][i] を切り替えて使うため、enumerate() 化は適さない。
+#[allow(clippy::needless_range_loop)]
 fn dp_fixpoint(constraints: &[Vec<Vec<usize>>; 2]) -> Option<bool> {
     let n = constraints[0].len();
     let mut grid = vec![vec![State::Unconfirmed; n]; n];
