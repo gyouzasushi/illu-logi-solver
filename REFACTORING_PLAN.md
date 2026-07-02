@@ -67,11 +67,33 @@ assert_eq!(solver.state(1, 1), State::Unconfirmed); // 黒に確定できるは�
 
 `Session` 方式では `hint`/チェックのたびに新品の `Solver` を作るため、キュー再投入という概念自体がなくなる。
 
+### Bug 3: 伝播矛盾のエラー座標が転置される
+
+`Solver::advance` の直交伝播（`src/lib.rs:643-647`）はエラーを発生源の行の座標 `(axis, i)` でラップするが、`LineError` 側の `j` は**直交行内の位置**なので座標系が混ざる。
+
+```rust
+let mut solver = Solver::new([
+    vec![vec![], vec![3, 1], vec![], vec![], vec![]],
+    vec![vec![1, 3], vec![], vec![], vec![], vec![]],
+]);
+// 真の矛盾セルはグリッド (1, 0)（列0の中で検出）だが、
+// エラーは Row[0][1] ＝グリッド (0, 1) を指す（転置）。さらに by は
+// 流用された偽の BlackIfOverlap で、current=Unconfirmed → new=Black
+// という「矛盾ですらないペア」が表示される。
+println!("{}", solver.solve().unwrap_err());
+```
+
+修正は下記設計問題3（`Operation` と書き込み出所の分離）に含める。座標は「矛盾を検出した行」基準に統一し、出所は `Cause::Propagation` が持つ。
+
 ## 設計上の問題（バグ予備軍・中優先）
 
 1. **`Solver::new` が panic する**（`assert_eq!` による正方形チェックのみ）。ライブラリとしては `Result` を返すべきで、あわせて入力検証を追加する: ブロックサイズ 0 の拒否、`sum(blocks) + gaps <= n` の検証。現状 `vec![0]` などを渡すと内部不変条件が壊れる（`wrapping_sub` 周りの演算が前提を失う）。`with_grid` では盤面サイズ・状態の整合も検証する。
 2. **正方形盤面限定**。`n` を `(height, width)` に分離する。目的は長方形パズル対応そのものではなく、同じ `n` が高さ・幅・行長の3役を兼ねることで i/j の取り違えがテストで検出できない（正方形は転置しても同じ形）状態の解消。`Line` は既に自分の長さを持っているので、変更は `Solver` 側の対称性の仮定（`queue` 初期化、`solve` の走査、`judge`、`Display`）に限られる。**対応時は `tests/soundness.rs` に長方形（例: 5x8, 7x3）のランダム盤面を必ず追加すること**。正方形のテストだけでは取り違え検出という導入意図が実現されない。
-3. **`update_possible_id` の矛盾報告が `Operation::BlackIfOverlap` を流用**（`src/lib.rs:344`）。「ブロックの置き場所がない」という別種の矛盾なので、専用のエラー表現（例: `Operation::NoPlacement(id)` か `SolverError` の新 variant）にする。
+3. **`Operation` と「書き込みの出所」の分離**。現状の `Operation` は2つの役割を同居させている: 8つの行内推論規則（`Action`/`Hint` に現れる）と、`SameStateAsOrthogonal`（矛盾エラーの `by` にしか現れない伝播マーカー。`hint()` にも `advance()` の戻り値にも一度も現れない）。さらに `update_possible_id` の「置き場所がない」矛盾が偽の `BlackIfOverlap` を流用している（`src/lib.rs:344`）。次の3層に分ける:
+   - `Operation`: 8規則のみ。`Action.by` と `Hint` はこの型を持ち、**「ヒントは常に行内規則」が型レベルで保証される**（`SameStateAsOrthogonal` variant は削除）。
+   - `Cause`: セル書き込みの出所。`Operation(Operation) | Propagation { axis: Axis, i: usize }`。矛盾エラーの `by` はこちらを持つ。伝播の発生源はこの variant のペイロードとして自然に載る。
+   - `LineError`/`SolverError` に **`NoPlacement { id }` variant を新設**し、偽 `BlackIfOverlap` の流用を廃止（これはセル書き込みの矛盾ではなく行レベルの矛盾なので、`Cause` ではなくエラー variant が正しい置き場所）。
+   矛盾エラーの座標は「矛盾を検出した行」基準（`axis.orthogonal(), j` に位置 `i`）に統一し、Bug 3 の転置を修正する。
 4. **`update` に `Unconfirmed` を渡すと Contradiction 扱い**（`src/lib.rs:170`）。推論が書き込む状態は白か黒だけなので、キューに積む型を `enum Determined { White, Black }` のような確定値専用型にし、型レベルで排除する。
 5. **`hint()` が残留キューを拾い得る**。`Solver::advance` は `Line` のキューから1件だけ取り出すため、`advance` と `hint` を混ぜて使うと `hint` がステップ実行結果ではなく残留項目を返し、「最も安いステップ順」の保証が崩れる。`Session` 経由（毎回新品の `Solver`）では発生しないが、コアAPIとして `advance` と併用した場合の仕様を明文化するか、クローン後にキューを先に消化してから探索する。
 6. **`Solver::advance` のキューに重複投入がある**（dedup なし）。`(axis, i)` の in-queue フラグを持たせれば無駄な再走査が減る。
@@ -87,9 +109,9 @@ assert_eq!(solver.state(1, 1), State::Unconfirmed); // 黒に確定できるは�
   - `fixedbitset` 依存を削除できる
 - **C. `Display` の重複排除**: `Solver::fmt` に同型のループが3つある（`src/lib.rs:728-814`）。1盤面を描くヘルパに畳む。3面併記のデバッグ表示は `Debug` か別メソッドに逃がし、`Display` は素直な1盤面にするのが自然。
 - **D. `Operation` のペイロードと `Action.range` の整合整理**: 例えば `BlackIfLeftBounded(l, r)` は塗った範囲 `j..r` と異なる区間を持つなど、variant ごとに意味がまちまち。「塗った範囲は `Action.range`、`Operation` は根拠の区間・ID」と役割を統一し、docコメントに明記する。あわせてペイロードの線引きを次で固定する:
-  - **`Operation` は数ワードの `Copy` を上限**とし、発火箇所で既知の `usize` は持たせてよい。具体的には `BlackIfOverlap` に根拠ブロックの id（ブロックごとのループ内で既知）、`WhiteIfTooLong` に唯一候補の id（計算済み）、`SameStateAsOrthogonal` に発生源の `(Axis, usize)`（呼び出し点で既知）。いずれも追加計算ゼロで、矛盾エラーの `by` の情報量も上がる。
+  - **`Operation` は数ワードの `Copy` を上限**とし、発火箇所で既知の `usize` は持たせてよい。具体的には `BlackIfOverlap` に根拠ブロックの id（ブロックごとのループ内で既知）、`WhiteIfTooLong` に唯一候補の id（計算済み）。いずれも追加計算ゼロで、矛盾エラーの `by` の情報量も上がる。伝播の発生源 `(Axis, usize)` は設計問題3の分離後は `Cause::Propagation` のペイロードとなり、`Operation` からは消える。
   - **アロケーションを伴う説明データ**（候補ID範囲の列など）は `Operation` に入れず、`hint()` がスナップショットから事後算出して `Hint` に載せる（現行 `Hint.possible_ids` の方式を一般化）。`hint` は `Session` 経由の使い捨て `Solver` 上で人間の操作頻度でしか呼ばれないため、コストを掛けてよい。solve のホットパスに乗るのは前者のみ、という分離が `Session` 方式の利点。
-  - **ペイロード追加の判定基準**: 「`Operation` のアンカー＋ヒント時点のスナップショットから、その推論の説明を一意に再構成できるか」。できないものだけ `Operation` に昇格させる（上記3つが該当: `BlackIfOverlap` は同じ範囲を複数ブロックが説明し得る、`SameStateAsOrthogonal` の発生源は行内から復元不能）。残る6規則はアンカー `(l, r)` でインスタンスが一意なので追加不要。variant ごとに説明データを足していくと各 variant が行状態を内蔵する方向に肥大するため、この基準で歯止めをかける。
+  - **ペイロード追加の判定基準**: 「アンカー＋ヒント時点のスナップショットから、その推論の説明を一意に再構成できるか」。できないものだけペイロードに昇格させる（`BlackIfOverlap` は同じ範囲を複数ブロックが説明し得るので id を `Operation` に、伝播の発生源は行内から復元不能なので `Cause::Propagation` に）。残る6規則はアンカー `(l, r)` でインスタンスが一意なので追加不要。variant ごとに説明データを足していくと各 variant が行状態を内蔵する方向に肥大するため、この基準で歯止めをかける。
   - 説明の根拠データは `Hint` を「行コンテキスト」に一般化して一枚で持つ: セルごとの候補ID範囲（`possible_ids`、導入済み）に加え、**ブロックごとの配置可能範囲とサイズ**を追加する。例えば `WhiteIfNoBlockCovers` の「ブロック#1は左からここまで、#2はここから先」は配置範囲から、`BlackIfLeftBounded`/`BlackIfBounded` の「最小候補サイズ m」は候補×サイズ列から導出できる。人間向けの文言化（説明文の組み立て）は `Session`/UI 層の仕事とし、コアの enum には入れない。
 - **E. 小物**: 単一 variant の `LineError` を struct に、`Line::n` は `cells.len()` と重複、`possible_id()` の `Range` clone 頻発、など。
 
