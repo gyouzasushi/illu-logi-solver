@@ -86,7 +86,9 @@ assert_eq!(solver.state(1, 1), State::Unconfirmed); // 黒に確定できるは�
   - セル毎 O(n) ビットセットのメモリと、`update_possible_id` 末尾の毎回全再構築（`src/lib.rs:349-357`）が消える
   - `fixedbitset` 依存を削除できる
 - **C. `Display` の重複排除**: `Solver::fmt` に同型のループが3つある（`src/lib.rs:728-814`）。1盤面を描くヘルパに畳む。3面併記のデバッグ表示は `Debug` か別メソッドに逃がし、`Display` は素直な1盤面にするのが自然。
-- **D. `Operation` のペイロードと `Action.range` の整合整理**: 例えば `BlackIfLeftBounded(l, r)` は塗った範囲 `j..r` と異なる区間を持つなど、variant ごとに意味がまちまち。「塗った範囲は `Action.range`、`Operation` は根拠の区間・ID」と役割を統一し、docコメントに明記する。
+- **D. `Operation` のペイロードと `Action.range` の整合整理**: 例えば `BlackIfLeftBounded(l, r)` は塗った範囲 `j..r` と異なる区間を持つなど、variant ごとに意味がまちまち。「塗った範囲は `Action.range`、`Operation` は根拠の区間・ID」と役割を統一し、docコメントに明記する。あわせてペイロードの線引きを次で固定する:
+  - **`Operation` は数ワードの `Copy` を上限**とし、発火箇所で既知の `usize` は持たせてよい。具体的には `BlackIfOverlap` に根拠ブロックの id（ブロックごとのループ内で既知）、`WhiteIfTooLong` に唯一候補の id（計算済み）、`SameStateAsOrthogonal` に発生源の `(Axis, usize)`（呼び出し点で既知）。いずれも追加計算ゼロで、矛盾エラーの `by` の情報量も上がる。
+  - **アロケーションを伴う説明データ**（候補ID範囲の列など）は `Operation` に入れず、`hint()` がスナップショットから事後算出して `Hint` に載せる（現行 `Hint.possible_ids` の方式を一般化）。`hint` は `Session` 経由の使い捨て `Solver` 上で人間の操作頻度でしか呼ばれないため、コストを掛けてよい。solve のホットパスに乗るのは前者のみ、という分離が `Session` 方式の利点。
 - **E. 小物**: 単一 variant の `LineError` を struct に、`Line::n` は `cells.len()` と重複、`possible_id()` の `Range` clone 頻発、など。
 
 ## 周辺整備
