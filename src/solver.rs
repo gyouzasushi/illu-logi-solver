@@ -5,9 +5,16 @@ use crate::{
 };
 use std::{collections::VecDeque, ops::Range};
 
+/// 盤面上の向き。制約 `[Vec<Vec<usize>>; 2]` の添字（`Axis::Row as usize` /
+/// `Axis::Column as usize`）や、エラー・`Action`/`Hint` の座標系
+/// （`axis`/`i`）に使う。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Axis {
+    /// 行方向。`constraints[Axis::Row as usize]` が各行の制約、
+    /// `i` は行番号（上から0始まり）。
     Row,
+    /// 列方向。`constraints[Axis::Column as usize]` が各列の制約、
+    /// `i` は列番号（左から0始まり）。
     Column,
 }
 impl Axis {
@@ -67,12 +74,25 @@ fn validate_line_constraint(
     Ok(())
 }
 
+/// 1回の確定操作: 「どの行・列の、どの範囲を、どんな状態に塗ったか」と、
+/// 「なぜそう言えるか（根拠）」の組。[`Solver::advance`] の戻り値と
+/// [`Hint::action`] に使う。
+///
+/// `range`/`state` が「どこを・何色に塗ったか」、`by` が「なぜ塗れると
+/// 分かったか（根拠）」という役割分担であり、`by: Operation` のペイロードは
+/// 塗った範囲そのものとは限らない（詳細は [`Operation`] のdocコメント）。
 #[derive(Debug, Clone)]
 pub struct Action {
+    /// この確定が起きた行の向き。
     pub axis: Axis,
+    /// `axis` 方向で何本目の行・列か。
     pub i: usize,
+    /// `axis`/`i` が指す行の中で、塗った範囲（半開区間）。
     pub range: Range<usize>,
+    /// 塗った状態。推論結果なので `State::Black`/`State::White` のいずれか
+    /// （`State::Unconfirmed` にはならない）。
     pub state: State,
+    /// なぜ塗れると分かったか（行内8規則のうちどれか）。
     pub by: Operation,
 }
 
@@ -86,6 +106,7 @@ pub struct Action {
 /// ここでは行の生データだけを持つ（REFACTORING_PLAN.md D項）。
 #[derive(Debug, Clone)]
 pub struct Hint {
+    /// 塗る操作そのもの（範囲・状態・根拠）。
     pub action: Action,
     /// `action.range` と同じ並びで、各セルの候補ブロックID範囲。
     /// ヒント算出と同一スナップショット上で読み出すため、常に `action` と整合する。
@@ -201,6 +222,30 @@ impl Solver {
         Ok(solver)
     }
 
+    /// 確定できる限り [`Solver::advance`] を繰り返し、盤面を完全に埋め切る。
+    ///
+    /// 全マスが確定すれば `Ok(())`（結果は `state`/[`Solver::judge`] で
+    /// 読み出す）。矛盾を検出すれば `Err(SolverError::Contradiction |
+    /// SolverError::NoPlacement)` を返す。矛盾せずに `advance` が尽きても
+    /// 未確定マスが残る（＝一意に解けない）場合は `Err(SolverError::
+    /// Indeterminate)` を返すが、このときも途中まで確定した部分盤面は
+    /// `state` で読み出せる（`Session::deduce` はこれを利用している）。
+    ///
+    /// # 使用例
+    ///
+    /// ```
+    /// use illu_logi_solver::{Solver, State};
+    ///
+    /// // 5x5、行は上から・列は左から順に、黒マスが連続する長さの並び。
+    /// let mut solver = Solver::new([
+    ///     vec![vec![2, 1], vec![3], vec![2, 2], vec![1, 2], vec![1, 1]],
+    ///     vec![vec![3, 1], vec![4], vec![1, 1], vec![2], vec![1, 2]],
+    /// ])
+    /// .unwrap();
+    /// solver.solve().expect("この5x5は一意に解ける");
+    /// assert!(solver.judge());
+    /// assert_eq!(solver.state(0, 0), State::Black);
+    /// ```
     pub fn solve(&mut self) -> Result<(), SolverError> {
         while self.advance()?.is_some() {}
         if self.lines[Axis::Row as usize]
@@ -214,6 +259,16 @@ impl Solver {
         }
     }
 
+    /// 最も安い推論ステップを1件だけ実行する。
+    ///
+    /// キューの先頭にある行・列から順に、確定できるものが見つかるまで
+    /// [`Line`] の8規則を安い順に試し、見つかった1件を盤面に反映して
+    /// [`Action`] として返す。もう何も確定できなければ `Ok(None)`。
+    /// 矛盾を検出すれば `Err`（`solve` と同じ種類のエラー）。
+    ///
+    /// `hint` と異なり、この呼び出しは `Solver` の内部状態を変更する
+    /// （非破壊ではない）。`hint` を混ぜて使うときの挙動は
+    /// [`Solver::hint`] のdocコメント（設計問題5）を参照。
     pub fn advance(&mut self) -> Result<Option<Action>, SolverError> {
         while let Some(&(axis, i)) = self.queue.front() {
             if let Some((range, state, by)) = self.lines[axis as usize][i]
@@ -333,10 +388,16 @@ impl Solver {
         Ok(None)
     }
 
+    /// これまでに [`Solver::advance`]（`solve` 内部の呼び出しを含む）が
+    /// 何回、確定操作を返したか。
     pub fn turn(&self) -> usize {
         self.turn_count
     }
 
+    /// 現盤面が制約をすべて満たしているかどうか。
+    ///
+    /// 各行・各列の黒マスの連続長の並びが、対応する制約の並びと一致するかを
+    /// 見る。未確定マスが残っていれば必ず `false`。
     pub fn judge(&self) -> bool {
         for &axis in &[Axis::Row, Axis::Column] {
             for i in 0..self.line_count(axis) {

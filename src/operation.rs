@@ -25,7 +25,14 @@ pub enum Operation {
     /// 最左配置と最右配置の重複部分。ブロックをどちらに寄せても `[l, r)` は必ず黒になる。
     /// `id` は根拠ブロック（同じ範囲を複数ブロックが説明し得るため、
     /// アンカーだけでは一意に再構成できずペイロードに昇格させた）。
-    BlackIfOverlap { l: usize, r: usize, id: usize },
+    BlackIfOverlap {
+        /// 重複区間の左端。
+        l: usize,
+        /// 重複区間の右端（半開区間）。
+        r: usize,
+        /// 根拠ブロックのID（0始まり）。
+        id: usize,
+    },
     /// `[l, r)` は両端が確定しており、候補ブロックが全て収まりきらない。
     BlackIfBounded(usize, usize),
     /// 左端 `l` が確定しているため、最小ブロックサイズ分だけ右へ黒が続く。
@@ -36,7 +43,12 @@ pub enum Operation {
     WhiteIfSegmentComplete(usize, usize),
     /// セル `j` を黒にすると唯一の候補ブロックのサイズを超えてしまう。
     /// `id` はその唯一の候補ブロック（計算済みで追加コストなし）。
-    WhiteIfTooLong { j: usize, id: usize },
+    WhiteIfTooLong {
+        /// 白だと確定できるセルの位置。
+        j: usize,
+        /// そのセルの唯一の候補ブロックのID（0始まり）。
+        id: usize,
+    },
     /// `[l, r)` が最小ブロックサイズより短い。
     WhiteIfTooShort(usize, usize),
     /// どのブロックを置いても `[l, r)` を黒にできない。

@@ -5,10 +5,14 @@ use crate::{
 };
 use std::{collections::VecDeque, fmt::Display, ops::Range};
 
+/// 1マスの状態。
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum State {
+    /// まだ黒とも白とも確定していない。
     Unconfirmed,
+    /// 白（塗らない）に確定済み。
     White,
+    /// 黒（塗る）に確定済み。
     Black,
 }
 
@@ -53,7 +57,13 @@ struct Block {
 /// `blocks[1].possible_placement` / `blocks[2].possible_placement` から読み取れる。
 #[derive(Debug, Clone)]
 pub struct HintBlock {
+    /// このブロックの長さ（制約に書かれた値そのもの）。
     pub size: usize,
+    /// このブロックが配置され得る範囲（半開区間）。ブロックの先頭マスが
+    /// この範囲のどこかに来る、という意味ではなく、ブロック全体
+    /// （`size` マス分）がこの範囲に収まり得ることを表す
+    /// （＝先頭マスの取り得る位置は `possible_placement.start
+    /// ..=possible_placement.end - size`）。
     pub possible_placement: Range<usize>,
 }
 
