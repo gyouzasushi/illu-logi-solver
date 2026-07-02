@@ -5,7 +5,7 @@ mod segments;
 mod session;
 mod solver;
 
-pub use error::SolverError;
+pub use error::{Cause, SolverError};
 pub use line::State;
 pub use operation::Operation;
 pub use session::Session;

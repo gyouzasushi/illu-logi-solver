@@ -1,5 +1,5 @@
 use crate::{
-    error::LineError,
+    error::{Cause, LineError},
     operation::Operation,
     segments::{Segments, SetMinMax},
 };
@@ -125,7 +125,7 @@ impl Line {
         &mut self,
         range: Range<usize>,
         state: Determined,
-        by: Operation,
+        by: Cause,
     ) -> Result<(), LineError> {
         for j in range {
             match (self.cells[j].state, state) {
@@ -176,7 +176,7 @@ impl Line {
             }
         }
         if let Some((range, state, by)) = self.queue.pop_front() {
-            self.update(range.clone(), state, by)?;
+            self.update(range.clone(), state, Cause::Operation(by))?;
             Ok(Some((range, state, by)))
         } else {
             Ok(None)
@@ -185,7 +185,7 @@ impl Line {
     #[cfg(test)]
     fn flush_queue(&mut self) -> Result<(), LineError> {
         while let Some((range, state, by)) = self.queue.pop_front() {
-            self.update(range.clone(), state, by)?;
+            self.update(range.clone(), state, Cause::Operation(by))?;
         }
         Ok(())
     }
@@ -302,13 +302,10 @@ impl Line {
             let start = self.blocks[id].possible_placement.start;
             let end = self.blocks[id].possible_placement.end;
             if start + self.blocks[id].size > end {
-                let j = start.min(n.saturating_sub(1));
-                return Err(LineError::Contradiction(
-                    j,
-                    self.cells[j].state,
-                    Determined::Black,
-                    Operation::BlackIfOverlap(start, start + self.blocks[id].size),
-                ));
+                // ブロック `id` がどこにも収まらない。特定のセルの書き込み衝突
+                // ではなく行レベルの矛盾なので、`Cause`/`Operation` を捏造せず
+                // 専用の `NoPlacement` として報告する。
+                return Err(LineError::NoPlacement(id));
             }
         }
 
@@ -324,7 +321,11 @@ impl Line {
                 continue;
             }
             let (l, r) = (r - self.blocks[id].size, l + self.blocks[id].size);
-            self.set_range(l..r, Determined::Black, Operation::BlackIfOverlap(l, r));
+            self.set_range(
+                l..r,
+                Determined::Black,
+                Operation::BlackIfOverlap { l, r, id },
+            );
         }
     }
     // どのブロックにも属せないセルは白
@@ -447,7 +448,7 @@ impl Line {
                 size += self.segments_black.size(j + 1);
             }
             if size > self.blocks[id].size {
-                self.set(j, Determined::White, Operation::WhiteIfTooLong(j));
+                self.set(j, Determined::White, Operation::WhiteIfTooLong { j, id });
             }
         }
     }

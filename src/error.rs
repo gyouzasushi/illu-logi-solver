@@ -5,9 +5,26 @@ use crate::{
 };
 use thiserror::Error;
 
+/// セル書き込みの出所。
+///
+/// `Operation` は8つの行内推論規則だけを表すのに対し、`Cause` は
+/// 「そのセルがなぜ書き換わったか」を表す。行内の推論なら `Operation` を
+/// そのまま包み、直交する行/列からの伝播なら発生源 `(axis, i)` を持つ
+/// `Propagation` になる。矛盾エラーの `by` はこちらを持つことで、
+/// 行内規則と伝播が型として混ざらない
+/// （`Hint`/`Action.by` は常に `Operation` のみを持つ）。
+#[derive(Clone, Copy, Debug)]
+pub enum Cause {
+    Operation(Operation),
+    Propagation { axis: Axis, i: usize },
+}
+
 #[derive(Debug)]
 pub(crate) enum LineError {
-    Contradiction(usize, State, Determined, Operation),
+    Contradiction(usize, State, Determined, Cause),
+    /// ブロック `id` の置き場所がどこにもない（行レベルの矛盾で、
+    /// 特定のセルの書き込み衝突ではない）。
+    NoPlacement(usize),
 }
 impl LineError {
     pub(crate) fn to_solver_error(&self, axis: Axis, i: usize) -> SolverError {
@@ -22,6 +39,7 @@ impl LineError {
                     by: *by,
                 }
             }
+            LineError::NoPlacement(id) => SolverError::NoPlacement { axis, i, id: *id },
         }
     }
 }
@@ -35,10 +53,12 @@ pub enum SolverError {
         j: usize,
         current_state: State,
         new_state: State,
-        by: Operation,
+        by: Cause,
     },
     #[error("could not find a solution: there might be multiple possible solutions.")]
     Indeterminate,
+    #[error("no valid placement for block {id} on {axis:?}[{i}]: it does not fit anywhere given the current cells.")]
+    NoPlacement { axis: Axis, i: usize, id: usize },
     #[error("{axis:?}[{i}] contains a block of size 0, which is not a valid constraint.")]
     InvalidBlockSize { axis: Axis, i: usize },
     #[error(

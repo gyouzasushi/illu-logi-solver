@@ -1,5 +1,5 @@
 use crate::{
-    error::SolverError,
+    error::{Cause, SolverError},
     line::{Line, State},
     operation::Operation,
 };
@@ -201,9 +201,14 @@ impl Solver {
                 .map_err(|err| err.to_solver_error(axis, i))?
             {
                 for j in range.clone() {
+                    // 矛盾エラーの座標は「矛盾を検出した行」基準に統一する
+                    // （REFACTORING_PLAN.md Bug 3）。ここで書き込み先は
+                    // axis.orthogonal() 上の行 j なので、失敗時の報告も
+                    // (axis.orthogonal(), j) を使う。伝播の発生源
+                    // (axis, i) は Cause::Propagation のペイロードとして残す。
                     self.lines[axis.orthogonal() as usize][j]
-                        .update(i..i + 1, state, Operation::SameStateAsOrthogonal)
-                        .map_err(|err| err.to_solver_error(axis, i))?;
+                        .update(i..i + 1, state, Cause::Propagation { axis, i })
+                        .map_err(|err| err.to_solver_error(axis.orthogonal(), j))?;
                     self.queue.push_front((axis.orthogonal(), j));
                 }
                 self.turn_count += 1;

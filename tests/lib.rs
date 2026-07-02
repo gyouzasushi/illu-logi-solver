@@ -31,13 +31,18 @@ fn constraints_for_10x10() -> [Vec<Vec<usize>>; 2] {
 
 #[test]
 fn test_no_solution() {
+    // このケースの正確なエラー形状（NoPlacement, 転置されない座標）は
+    // test_bug3_contradiction_coordinates_are_not_transposed で検証する。
     let mut solver = Solver::new([
         vec![vec![], vec![3, 1], vec![], vec![], vec![]],
         vec![vec![1, 3], vec![], vec![], vec![], vec![]],
     ])
     .unwrap();
     let result = solver.solve();
-    assert!(matches!(result, Err(SolverError::Contradiction { .. })));
+    assert!(matches!(
+        result,
+        Err(SolverError::Contradiction { .. } | SolverError::NoPlacement { .. })
+    ));
 
     let mut solver = Solver::new([
         vec![vec![5], vec![1], vec![], vec![], vec![]],
@@ -45,11 +50,51 @@ fn test_no_solution() {
     ])
     .unwrap();
     let result = solver.solve();
-    assert!(matches!(result, Err(SolverError::Contradiction { .. })));
+    assert!(matches!(
+        result,
+        Err(SolverError::Contradiction { .. } | SolverError::NoPlacement { .. })
+    ));
 
     let mut solver = Solver::new([vec![vec![1], vec![1]], vec![vec![1], vec![1]]]).unwrap();
     let result = solver.solve();
     assert!(matches!(result, Err(SolverError::Indeterminate)));
+}
+
+// REFACTORING_PLAN.md「確認済みバグ」Bug 3 の再現シナリオ:
+// 直交伝播の矛盾エラーは発生源の行の座標 (axis, i) でラップされていたが、
+// 実際に矛盾を検出したのは直交行内の位置 j だったため座標系が混ざり、
+// さらに検出根拠も偽の BlackIfOverlap が流用されていた。
+//
+// 真の矛盾はグリッド (1, 0) にある: 列0の制約 [1, 3] は列0を
+// ちょうど埋める配置（黒・白・黒黒黒）を要求するが、行0・行2〜4の制約が
+// 空（全マス白）のため、列0の (0,0)/(2,0)/(3,0)/(4,0) は白でなければならず、
+// 結果として列0の制約[1,3]がどこにも配置できなくなる
+// （行レベルの矛盾＝ NoPlacement として検出される）。
+#[test]
+fn test_bug3_contradiction_coordinates_are_not_transposed() {
+    let mut solver = Solver::new([
+        vec![vec![], vec![3, 1], vec![], vec![], vec![]],
+        vec![vec![1, 3], vec![], vec![], vec![], vec![]],
+    ])
+    .unwrap();
+    let result = solver.solve();
+    match result {
+        Err(SolverError::NoPlacement { axis, i, id }) => {
+            // 矛盾を検出したのは列0（制約 [1, 3] のブロック0）自身。
+            assert_eq!(axis, Axis::Column);
+            assert_eq!(i, 0);
+            assert_eq!(id, 0);
+        }
+        Err(SolverError::Contradiction { axis, i, j, .. }) => {
+            // Contradiction として現れる場合も、報告座標は「矛盾を検出した行」
+            // 基準（列0上の位置）でなければならず、転置された Row[0][1] には
+            // ならない。
+            assert_eq!(axis, Axis::Column);
+            assert_eq!(i, 0);
+            assert_eq!(j, 1);
+        }
+        other => panic!("expected NoPlacement or Contradiction, got {other:?}"),
+    }
 }
 
 #[test]
